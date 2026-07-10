@@ -1,0 +1,16 @@
+# Rust
+/target
+**/*.rs.bk
+
+# Never commit a password export — this tool ingests plaintext CSVs.
+*.csv
+Google Passwords.csv
+Chrome Passwords.csv
+
+# Local env / scratch
+.env
+.env.*
+/scratch
+
+# macOS
+.DS_Store

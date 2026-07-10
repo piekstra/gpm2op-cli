@@ -1,0 +1,28 @@
+[package]
+name = "gpm2op"
+description = "Idempotently upsert Google/Chrome Password Manager exports into 1Password via the op CLI."
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.82"
+license = "MIT"
+repository = "https://github.com/piekstra/gpm2op"
+authors = ["piekstra"]
+
+[[bin]]
+name = "gpm2op"
+path = "src/main.rs"
+
+[dependencies]
+clap = { version = "4", features = ["derive", "wrap_help"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+csv = "1"
+anyhow = "1"
+thiserror = "2"
+comfy-table = "7"
+url = "2"
+tempfile = "3"
+
+[profile.release]
+strip = true
+lto = "thin"
