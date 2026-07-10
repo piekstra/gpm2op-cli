@@ -6,6 +6,7 @@ mod credential;
 mod error;
 mod op;
 mod report;
+mod selfupdate;
 mod sync;
 
 use clap::Parser;
@@ -30,6 +31,7 @@ fn run(cli: Cli) -> error::Result<ExitCode> {
     match cli.command {
         Command::Check(args) => check(args),
         Command::Sync(args) => do_sync(args),
+        Command::SelfUpdate(args) => selfupdate::run(&args).map(|()| ExitCode::SUCCESS),
     }
 }
 

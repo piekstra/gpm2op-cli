@@ -22,6 +22,7 @@ thiserror = "2"
 comfy-table = "7"
 url = "2"
 tempfile = "3"
+self_update = { version = "0.42", features = ["archive-tar", "compression-flate2"] }
 
 [profile.release]
 strip = true

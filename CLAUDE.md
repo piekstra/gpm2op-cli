@@ -52,6 +52,14 @@ QR) and passkeys (non-exportable) are intentionally out — see README. If addin
 TOTP later, it slots in as a new subcommand + module; the `op` OTP field is set
 the same secret-safe way (JSON template with a field of `"type":"OTP"`).
 
+## Self-update & releases
+
+`src/selfupdate.rs` (`gpm2op self-update`) uses the `self_update` crate's GitHub
+backend to pull the platform binary from this repo's Releases and swap it in
+place. Assets are matched by Rust target triple, so the release workflow
+(`.github/workflows/release.yml`, triggered by a `v*` tag) names them
+`gpm2op-<tag>-<target>.tar.gz`. `version.txt` mirrors the Cargo version.
+
 ## Testing
 
 Unit tests cover CSV parsing (incl. short/missing-note rows), host

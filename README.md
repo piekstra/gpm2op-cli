@@ -62,6 +62,7 @@ gpm2op sync passwords.csv                      # create missing logins
 gpm2op sync passwords.csv --update             # also fix changed passwords
 gpm2op sync passwords.csv --vault "Personal"   # choose a vault (default: Private)
 gpm2op sync passwords.csv --json               # machine-readable summary
+gpm2op self-update                             # update the binary in place
 ```
 
 - **Default (no `--update`):** create logins that don't exist yet; never touch
@@ -95,6 +96,17 @@ the source is short enough to audit end to end:
   errors.
 - **Delete the CSV** when you're done; it's plaintext. The tool reminds you
   after any create.
+
+## Updating
+
+```bash
+gpm2op self-update --check   # is a newer release available?
+gpm2op self-update           # download it and replace the binary in place
+```
+
+Releases are produced by pushing a version tag (`git tag v0.2.0 && git push
+origin v0.2.0`), which triggers the release workflow that builds the binaries
+`self-update` pulls. Package-manager installs should upgrade via that manager.
 
 ## Development
 

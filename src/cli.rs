@@ -21,6 +21,18 @@ pub enum Command {
     Sync(SyncArgs),
     /// Verify `op` is installed and signed in, and show the target vault.
     Check(CheckArgs),
+    /// Update gpm2op in place from the latest GitHub release.
+    SelfUpdate(SelfUpdateArgs),
+}
+
+#[derive(Debug, Args)]
+pub struct SelfUpdateArgs {
+    /// Only report whether a newer release exists; don't install it.
+    #[arg(long)]
+    pub check: bool,
+    /// Don't prompt for confirmation before replacing the binary.
+    #[arg(short = 'y', long)]
+    pub yes: bool,
 }
 
 #[derive(Debug, Args)]
