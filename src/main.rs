@@ -18,20 +18,64 @@ use std::process::ExitCode;
 use sync::OnConflict;
 
 fn main() -> ExitCode {
-    match run(Cli::parse()) {
+    let cli = Cli::parse();
+    let json_mode = cli.json;
+    match run(cli) {
         Ok(code) => code,
         Err(err) => {
+            let cli_err = to_cli_error(&err);
+            if json_mode {
+                pk_cli_core::output::json(&cli_err.to_json());
+            }
             eprintln!("error: {err}");
-            ExitCode::FAILURE
+            ExitCode::from(cli_err.exit_code() as u8)
         }
     }
 }
 
+/// Map local errors onto the family exit-code contract (piekstra-cli/1).
+fn to_cli_error(err: &error::Error) -> pk_cli_core::CliError {
+    use error::Error as E;
+    use pk_cli_core::CliError;
+    match err {
+        E::OpNotSignedIn => CliError::Auth(err.to_string()),
+        E::OpMissing | E::Csv(_) => CliError::Usage(err.to_string()),
+        E::Op(m) | E::Parse(m) => CliError::Upstream(m.clone()),
+        E::Update(m) => CliError::Other(m.clone()),
+        _ => CliError::Other(err.to_string()),
+    }
+}
+
 fn run(cli: Cli) -> error::Result<ExitCode> {
+    let json = cli.json;
     match cli.command {
         Command::Check(args) => check(args),
-        Command::Sync(args) => do_sync(args),
-        Command::SelfUpdate(args) => selfupdate::run(&args).map(|()| ExitCode::SUCCESS),
+        Command::Sync(mut args) => {
+            args.json |= json;
+            do_sync(args)
+        }
+        Command::SelfUpdate(args) => selfupdate::run(&args, json).map(|()| ExitCode::SUCCESS),
+        Command::Completions { shell } => {
+            use clap::CommandFactory;
+            clap_complete::generate(shell, &mut Cli::command(), "gpm2op", &mut std::io::stdout());
+            Ok(ExitCode::SUCCESS)
+        }
+        Command::Info => {
+            use pk_cli_core::info::{AuthInfo, CliInfo};
+            let info = CliInfo::new(
+                "gpm2op",
+                env!("CARGO_PKG_VERSION"),
+                "https://github.com/piekstra/gpm2op-cli",
+                AuthInfo {
+                    required: false,
+                    method: "none".into(),
+                    login_hint: Some("sign in to the 1Password CLI (`op signin`)".into()),
+                },
+                &["sync", "check"],
+            );
+            pk_cli_core::output::json(&serde_json::to_value(&info).unwrap_or_default());
+            Ok(ExitCode::SUCCESS)
+        }
     }
 }
 

@@ -39,7 +39,7 @@ that's the part that can actually be automated:
 - A **Rust toolchain** (1.82+) to build.
 
 ```bash
-git clone https://github.com/piekstra/gpm2op
+git clone https://github.com/piekstra/gpm2op-cli
 cd gpm2op
 cargo install --path .        # installs the `gpm2op` binary
 ```

@@ -1,6 +1,8 @@
 //! Command-line surface.
 
 use clap::{Args, Parser, Subcommand};
+use clap_complete::Shell;
+pub use pk_cli_selfupdate::SelfUpdateArgs;
 
 /// Catch your 1Password vault up to a Google/Chrome Password Manager export.
 ///
@@ -11,6 +13,10 @@ use clap::{Args, Parser, Subcommand};
 #[derive(Debug, Parser)]
 #[command(name = "gpm2op", version, about, long_about = None)]
 pub struct Cli {
+    /// Emit machine-readable JSON on stdout (diagnostics go to stderr).
+    #[arg(long, global = true)]
+    pub json: bool,
+
     #[command(subcommand)]
     pub command: Command,
 }
@@ -23,16 +29,16 @@ pub enum Command {
     Check(CheckArgs),
     /// Update gpm2op in place from the latest GitHub release.
     SelfUpdate(SelfUpdateArgs),
-}
 
-#[derive(Debug, Args)]
-pub struct SelfUpdateArgs {
-    /// Only report whether a newer release exists; don't install it.
-    #[arg(long)]
-    pub check: bool,
-    /// Don't prompt for confirmation before replacing the binary.
-    #[arg(short = 'y', long)]
-    pub yes: bool,
+    /// Print a shell completion script (e.g. `gpm2op completions zsh`).
+    Completions {
+        /// Shell to generate completions for.
+        #[arg(value_enum)]
+        shell: Shell,
+    },
+
+    /// Machine-readable capability discovery (cli-info/v1).
+    Info,
 }
 
 #[derive(Debug, Args)]
