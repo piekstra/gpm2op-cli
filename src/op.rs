@@ -115,9 +115,13 @@ impl Op {
     }
 
     /// Verify `op` is installed and a session is available.
+    ///
+    /// Probes with `op vault list`, a real read: it succeeds whenever `op`
+    /// can actually serve requests (desktop-app integration or a session
+    /// token). `op whoami` is deliberately not used — it reports "not signed
+    /// in" under the desktop-app integration even while reads work.
     pub fn preflight(&self) -> Result<String> {
-        // `op whoami` succeeds only when signed in.
-        let out = self.run(&["whoami".into(), "--format".into(), "json".into()], None)?;
+        let out = self.run(&["vault".into(), "list".into(), "--format".into(), "json".into()], None)?;
         Ok(out.trim().to_string())
     }
 
