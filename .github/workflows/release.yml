@@ -2,9 +2,9 @@ name: release
 
 # Cut a release by pushing a tag like `v0.1.0`. One Linux job and ONE macOS
 # job (Apple Silicon, which cross-compiles the Intel target — the macOS SDK is
-# universal). Build jobs are independent (fail-fast: false), so a slow or dead
-# macOS queue can never block the Linux assets and only one macOS runner is ever
-# needed.
+# universal). Build jobs are independent (fail-fast: false), so one failing never
+# stops the other, and only one macOS runner is ever needed. A stalled macOS queue
+# delays the release for every platform until that job ends.
 #
 # `publish` attaches whatever was built to a draft, even when one build failed, and
 # publishes it only once every expected asset is there. A missing one fails the
