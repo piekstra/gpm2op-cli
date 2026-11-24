@@ -1,0 +1,37 @@
+# Changelog
+
+## v0.3.0 — 2026-11-23
+
+- **`gpm2op sync` deletes the CSV export by default** once a non-dry-run
+  finishes with no failed rows, including a run that created nothing. The
+  export is a copy of what Google Password Manager still holds. It is kept,
+  with a note on stderr, after `--keep-csv`, `--dry-run`, any failed row (the
+  clean rerun deletes it), or an export with no usable rows. Only the regular
+  file that was read is removed: a symlink, directory, pipe or `/dev/stdin` is
+  left alone, and so is a file that changed during the run.
+- **`--keep-csv`** keeps the export. A script that syncs the same file more
+  than once, such as a second vault or a later `--update`, passes it on every
+  run but the last; without it, the first run deletes the file.
+- Rows not checked against 1Password are counted: rows matched to an existing
+  login and not compared, rows with no username matched to the only login on
+  their site, and earlier duplicates of a later row. Human mode names each
+  group on stderr. The deletion line says 1Password holds every credential only
+  when there are none.
+- **The `Read N credential(s) from …` line is on stderr in every mode**, human
+  mode included. It was on stdout, so a script that parsed it there no longer
+  finds it.
+- **`--json` stdout is exactly one JSON document.** `sync` emits
+  `sync-result/v1`, which adds `schema`, `summary.csv_deleted` and
+  `summary.unverified` (`not_compared`, `host_only`, `deduped`). An export with
+  no usable rows emits an empty `sync-result/v1` instead of a text line.
+  `check` emits `check-result/v1` (`vault`, `logins`) instead of its human
+  line.
+- A failed row's `result` names op's own message (`failed: [ERROR] …`), not
+  only "`op` reported an error:".
+- `--update`'s `0600` temp file survives no stop signal short of `SIGKILL`.
+  SIGINT, SIGTERM, SIGHUP and SIGQUIT are held while it exists and passed on
+  to `op`, which gets 5 s to exit before it is killed. An edit still running
+  after `GPM2OP_EDIT_TIMEOUT` seconds (default 120) is stopped and its row
+  fails.
+
+Earlier versions: see the GitHub releases.

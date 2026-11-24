@@ -8,6 +8,7 @@ use std::fs;
 use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
+use std::time::{Duration, Instant};
 
 fn repo(rel: &str) -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join(rel)
@@ -122,6 +123,55 @@ fn a_clean_sync_deletes_the_export() {
         stdout(&out)
     );
     assert!(!stderr(&out).contains("Reminder"));
+}
+
+#[test]
+fn a_run_that_checked_every_row_says_so() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t
+        .command(&["sync", s(&export)])
+        .env("FAKE_OP_ITEM_LIST", "item-list-empty.json")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(
+        stdout(&out).contains("every credential read from it is in 1Password now"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!stderr(&out).contains("row(s)"), "{}", stderr(&out));
+}
+
+#[test]
+fn rows_not_checked_against_1password_are_counted_and_named() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export-unverified-rows.csv");
+    let out = t.run(&["sync", s(&export)]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!export.exists(), "the export is still on disk");
+    let err = stderr(&out);
+    assert!(
+        err.contains("1 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager; run with --update to reconcile."),
+        "{err}"
+    );
+    assert!(err.contains("1 row(s) had no username"), "{err}");
+    assert!(err.contains("1 row(s) repeated a later row's"), "{err}");
+    let out_text = stdout(&out);
+    assert!(!out_text.contains("is in 1Password now"), "{out_text}");
+    assert!(
+        out_text.contains("Google Password Manager still holds every password in it"),
+        "{out_text}"
+    );
+
+    let export = t.export("google-passwords-export-unverified-rows.csv");
+    let doc = one_json_document(&t.run(&["--json", "sync", s(&export)]));
+    assert_eq!(
+        doc["summary"]["unverified"],
+        serde_json::json!({"not_compared": 1, "host_only": 1, "deduped": 1})
+    );
+    assert_eq!(doc["summary"]["created"], 1);
+    assert_eq!(doc["summary"]["csv_deleted"], true);
 }
 
 #[test]
@@ -351,6 +401,98 @@ fn update_removes_its_template_when_interrupted_mid_edit() {
         assert_eq!(leftover_temp_files(&t.tmp()), Vec::<PathBuf>::new());
         assert!(export.exists(), "an interrupted sync deleted the export");
     }
+}
+
+/// Wait for `child` up to `limit`; kill it and panic if it outlives that.
+fn wait_within(child: &mut std::process::Child, limit: Duration) -> std::process::ExitStatus {
+    let until = Instant::now() + limit;
+    loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            return status;
+        }
+        if Instant::now() >= until {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("gpm2op still running after {limit:?}");
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
+#[test]
+fn a_sigterm_to_gpm2op_alone_reaches_op_and_removes_the_template() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let mut child = t
+        .command(&["sync", s(&export), "--update"])
+        .env("FAKE_OP_EDIT_SLEEP", "30")
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .unwrap();
+    // A supervisor's `kill <pid>`: the signal reaches gpm2op only, while op
+    // waits on a prompt nobody answers.
+    let until = Instant::now() + Duration::from_secs(10);
+    while templates(&t.log()).is_empty() {
+        assert!(Instant::now() < until, "op item edit never started");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let signalled = Instant::now();
+    unsafe {
+        libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
+    }
+    let status = wait_within(&mut child, Duration::from_secs(10));
+    assert_eq!(status.signal(), Some(libc::SIGTERM), "{status:?}");
+    // op ends on the forwarded signal itself, well inside the 5 s grace
+    // after which it would be killed.
+    assert!(
+        signalled.elapsed() < Duration::from_secs(3),
+        "op did not stop on the forwarded SIGTERM: {:?}",
+        signalled.elapsed()
+    );
+    let templates = templates(&t.log());
+    assert!(!templates[0].1.exists(), "SIGTERM left the template");
+    assert_eq!(leftover_temp_files(&t.tmp()), Vec::<PathBuf>::new());
+    assert!(export.exists(), "an interrupted sync deleted the export");
+}
+
+#[test]
+fn an_edit_that_never_finishes_is_stopped_and_fails_its_row() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let started = Instant::now();
+    let out = t
+        .command(&["--json", "sync", s(&export), "--update"])
+        .env("FAKE_OP_EDIT_SLEEP", "30")
+        .env("GPM2OP_EDIT_TIMEOUT", "1")
+        .output()
+        .unwrap();
+    assert!(
+        started.elapsed() < Duration::from_secs(10),
+        "{:?}",
+        started.elapsed()
+    );
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let doc = one_json_document(&out);
+    assert_eq!(doc["summary"]["failed"], 1);
+    assert_eq!(doc["summary"]["csv_deleted"], false);
+    let stuck = doc["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["host"] == "example.com")
+        .unwrap();
+    assert!(
+        stuck["result"]
+            .as_str()
+            .unwrap()
+            .starts_with("failed: `op item edit` did not finish within 1 s and was stopped"),
+        "{stuck}"
+    );
+    let templates = templates(&t.log());
+    assert!(!templates[0].1.exists(), "a stopped edit left the template");
+    assert_eq!(leftover_temp_files(&t.tmp()), Vec::<PathBuf>::new());
+    assert!(export.exists());
 }
 
 #[test]

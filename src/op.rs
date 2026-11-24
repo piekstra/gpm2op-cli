@@ -7,8 +7,11 @@
 
 use crate::error::{Error, Result};
 use serde::Deserialize;
-use std::io::Write;
-use std::process::{Command, Stdio};
+use std::cell::Cell;
+use std::io::{Read, Write};
+use std::process::{Child, Command, ExitStatus, Stdio};
+use std::thread::JoinHandle;
+use std::time::{Duration, Instant};
 
 /// An item as returned by `op item list`/`op item get` (the subset we use).
 #[derive(Debug, Clone, Deserialize)]
@@ -70,26 +73,24 @@ impl Op {
         a
     }
 
-    /// Run `op` with args and optional stdin, returning stdout on success.
-    fn run(&self, args: &[String], stdin: Option<&str>) -> Result<String> {
+    fn command(&self, args: &[String]) -> Command {
         let mut cmd = Command::new("op");
         cmd.args(self.base_args());
         cmd.args(args);
+        cmd.stdout(Stdio::piped());
+        cmd.stderr(Stdio::piped());
+        cmd
+    }
+
+    /// Run `op` with args and optional stdin, returning stdout on success.
+    fn run(&self, args: &[String], stdin: Option<&str>) -> Result<String> {
+        let mut cmd = self.command(args);
         cmd.stdin(if stdin.is_some() {
             Stdio::piped()
         } else {
             Stdio::null()
         });
-        cmd.stdout(Stdio::piped());
-        cmd.stderr(Stdio::piped());
-
-        let mut child = cmd.spawn().map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                Error::OpMissing
-            } else {
-                Error::Spawn(e.to_string())
-            }
-        })?;
+        let mut child = spawn(&mut cmd)?;
 
         if let Some(data) = stdin {
             child
@@ -101,17 +102,43 @@ impl Op {
 
         let out = child.wait_with_output()?;
         if !out.status.success() {
-            let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
-            let lc = stderr.to_lowercase();
-            if lc.contains("not signed in")
-                || lc.contains("no account")
-                || lc.contains("you are not currently signed in")
-            {
-                return Err(Error::OpNotSignedIn);
-            }
-            return Err(Error::Op(stderr));
+            return Err(failure(&String::from_utf8_lossy(&out.stderr)));
         }
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+    }
+
+    /// Run `op` while `hold` defers the stop signals, without waiting forever.
+    /// A held signal is forwarded to `op`, which gets `STOP_GRACE` to exit
+    /// before it is killed; `op` is also killed once `limit` passes, so a
+    /// prompt nobody answers cannot hang the run.
+    fn run_held(&self, args: &[String], hold: &SignalHold, limit: Duration) -> Result<()> {
+        let mut cmd = self.command(args);
+        cmd.stdin(Stdio::null());
+        hold.release_in_child(&mut cmd);
+        let mut child = spawn(&mut cmd)?;
+        // Readers keep op from blocking on a full pipe. Started under the
+        // hold, they inherit its mask.
+        let stdout = child.stdout.take().map(drain);
+        let stderr = child.stderr.take().map(drain);
+        let waited = match supervise(&mut child, hold, limit) {
+            Ok(waited) => waited,
+            Err(e) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(e.into());
+            }
+        };
+        let stderr = stderr.and_then(collect).unwrap_or_default();
+        drop(stdout.and_then(collect));
+        match waited {
+            Waited::Exited(status) if status.success() => Ok(()),
+            Waited::Exited(_) => Err(failure(&String::from_utf8_lossy(&stderr))),
+            Waited::TimedOut => Err(Error::Op(format!(
+                "`op item edit` did not finish within {} s and was stopped; an unanswered \
+                 1Password prompt is the usual cause, so rerun when it can be approved",
+                limit.as_secs()
+            ))),
+        }
     }
 
     /// Verify `op` is installed and a session is available.
@@ -193,8 +220,9 @@ impl Op {
 
     /// Replace an item from a full JSON template written to a `0600` temp file.
     /// The file is removed as soon as `op` returns: `NamedTempFile` deletes it
-    /// when dropped, on every return and on a panic, and `SignalHold` keeps a
-    /// Ctrl-C from ending the process before that drop runs.
+    /// when dropped, on every return and on a panic. `SignalHold` defers a stop
+    /// signal until after that drop, and `run_held` forwards it to `op` and
+    /// bounds the wait (`GPM2OP_EDIT_TIMEOUT`).
     pub fn edit_from_template(&self, id: &str, template_json: &str) -> Result<()> {
         let hold = SignalHold::new();
         let mut tmp = tempfile::Builder::new()
@@ -205,7 +233,7 @@ impl Op {
         tmp.write_all(template_json.as_bytes())?;
         tmp.flush()?;
         let path = tmp.path().to_string_lossy().into_owned();
-        let res = self.run(
+        let res = self.run_held(
             &[
                 "item".into(),
                 "edit".into(),
@@ -213,21 +241,120 @@ impl Op {
                 "--template".into(),
                 path,
             ],
-            None,
+            &hold,
+            edit_timeout(),
         );
         drop(tmp);
         drop(hold);
-        res.map(|_| ())
+        res
     }
 }
 
-/// Defers SIGINT, SIGTERM, SIGHUP and SIGQUIT while it lives. A signal that
-/// arrives meanwhile is delivered when the hold drops, so the process still
-/// ends, but only after the revealed item's temp file is gone. `op` still gets
-/// the signal: std clears the signal mask of every child it spawns.
+fn spawn(cmd: &mut Command) -> Result<Child> {
+    cmd.spawn().map_err(|e| {
+        if e.kind() == std::io::ErrorKind::NotFound {
+            Error::OpMissing
+        } else {
+            Error::Spawn(e.to_string())
+        }
+    })
+}
+
+/// The error for an `op` call that exited non-zero, from its stderr.
+fn failure(stderr: &str) -> Error {
+    let stderr = stderr.trim().to_string();
+    let lc = stderr.to_lowercase();
+    if lc.contains("not signed in")
+        || lc.contains("no account")
+        || lc.contains("you are not currently signed in")
+    {
+        return Error::OpNotSignedIn;
+    }
+    Error::Op(stderr)
+}
+
+const DEFAULT_EDIT_TIMEOUT: Duration = Duration::from_secs(120);
+const STOP_GRACE: Duration = Duration::from_secs(5);
+const POLL: Duration = Duration::from_millis(20);
+
+/// How long `op item edit` may run: `GPM2OP_EDIT_TIMEOUT` seconds, else 120.
+fn edit_timeout() -> Duration {
+    std::env::var("GPM2OP_EDIT_TIMEOUT")
+        .ok()
+        .and_then(|v| v.trim().parse::<u64>().ok())
+        .filter(|&secs| secs > 0)
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_EDIT_TIMEOUT)
+}
+
+fn drain<R: Read + Send + 'static>(mut pipe: R) -> JoinHandle<Vec<u8>> {
+    std::thread::spawn(move || {
+        let mut buf = Vec::new();
+        let _ = pipe.read_to_end(&mut buf);
+        buf
+    })
+}
+
+/// A reader's bytes, unless something op started still holds the pipe open a
+/// moment after op exited.
+fn collect(reader: JoinHandle<Vec<u8>>) -> Option<Vec<u8>> {
+    let until = Instant::now() + Duration::from_secs(1);
+    while !reader.is_finished() && Instant::now() < until {
+        std::thread::sleep(POLL);
+    }
+    reader.is_finished().then(|| reader.join().ok()).flatten()
+}
+
+enum Waited {
+    Exited(ExitStatus),
+    TimedOut,
+}
+
+/// Wait for `child`, forwarding the first held signal to it and killing it
+/// once the grace after that signal, or `limit`, runs out.
+fn supervise(child: &mut Child, hold: &SignalHold, limit: Duration) -> std::io::Result<Waited> {
+    let started = Instant::now();
+    let mut stop_by: Option<Instant> = None;
+    loop {
+        if let Some(status) = child.try_wait()? {
+            return Ok(Waited::Exited(status));
+        }
+        if stop_by.is_none() && hold.forward_pending(child.id()) {
+            stop_by = Some(Instant::now() + STOP_GRACE);
+        }
+        let now = Instant::now();
+        let signalled = stop_by.is_some();
+        if stop_by.is_some_and(|t| now >= t) || now.duration_since(started) >= limit {
+            let _ = child.kill();
+            let status = child.wait()?;
+            return Ok(if signalled {
+                Waited::Exited(status)
+            } else {
+                Waited::TimedOut
+            });
+        }
+        std::thread::sleep(POLL);
+    }
+}
+
+/// Defers SIGINT, SIGTERM, SIGHUP and SIGQUIT while it lives, so a stop
+/// signal ends the process only after the revealed item's temp file is gone.
+/// `supervise` forwards a held signal to `op`, since a signal sent to gpm2op
+/// alone (`kill`, `timeout`, a supervisor) never reaches it. When the hold
+/// drops, the pending signal is delivered, and re-raised if it was not.
+///
+/// The mask is per thread, so the hold assumes gpm2op is single-threaded
+/// while it lives, apart from threads started under it, which inherit the
+/// mask. Any other thread that leaves these signals unblocked would take a
+/// process-directed one and end the process with the file still on disk.
+/// A spawned child inherits the mask too (std does not reset it on macOS), so
+/// `release_in_child` gives `op` the mask from before the hold.
 struct SignalHold {
     #[cfg(unix)]
+    held: libc::sigset_t,
+    #[cfg(unix)]
     previous: Option<libc::sigset_t>,
+    received: Cell<Option<i32>>,
 }
 
 impl SignalHold {
@@ -236,22 +363,80 @@ impl SignalHold {
         // SAFETY: sigemptyset/sigaddset only write the local set, and
         // pthread_sigmask reads it and writes the previous mask into a local.
         unsafe {
-            let mut set: libc::sigset_t = std::mem::zeroed();
-            libc::sigemptyset(&mut set);
+            let mut held: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut held);
             for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
-                libc::sigaddset(&mut set, sig);
+                libc::sigaddset(&mut held, sig);
             }
             let mut previous: libc::sigset_t = std::mem::zeroed();
-            let ok = libc::pthread_sigmask(libc::SIG_BLOCK, &set, &mut previous) == 0;
+            let ok = libc::pthread_sigmask(libc::SIG_BLOCK, &held, &mut previous) == 0;
             SignalHold {
+                held,
                 previous: ok.then_some(previous),
+                received: Cell::new(None),
             }
         }
     }
 
     #[cfg(not(unix))]
     fn new() -> SignalHold {
-        SignalHold {}
+        SignalHold {
+            received: Cell::new(None),
+        }
+    }
+
+    /// Start `cmd`'s process with the signal mask from before the hold, so
+    /// `op` can be stopped by the signals it receives.
+    #[cfg(unix)]
+    fn release_in_child(&self, cmd: &mut Command) {
+        use std::os::unix::process::CommandExt;
+        if let Some(previous) = self.previous {
+            // SAFETY: the closure runs in the forked child before exec and
+            // calls only sigprocmask, which is async-signal-safe.
+            unsafe {
+                cmd.pre_exec(move || {
+                    if libc::sigprocmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut()) != 0 {
+                        return Err(std::io::Error::last_os_error());
+                    }
+                    Ok(())
+                });
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn release_in_child(&self, _cmd: &mut Command) {}
+
+    /// If a held signal is pending, send it to `pid` and remember it. Peeking
+    /// leaves it pending, so it is still delivered when the hold drops.
+    #[cfg(unix)]
+    fn forward_pending(&self, pid: u32) -> bool {
+        if self.previous.is_none() {
+            return false;
+        }
+        // SAFETY: sigpending writes a local set; sigismember reads it and the
+        // held set; kill only sends a signal to the child we spawned and have
+        // not yet reaped.
+        unsafe {
+            let mut pending: libc::sigset_t = std::mem::zeroed();
+            if libc::sigpending(&mut pending) != 0 {
+                return false;
+            }
+            for sig in [libc::SIGTERM, libc::SIGINT, libc::SIGHUP, libc::SIGQUIT] {
+                if libc::sigismember(&self.held, sig) == 1 && libc::sigismember(&pending, sig) == 1
+                {
+                    self.received.set(Some(sig));
+                    libc::kill(pid as libc::pid_t, sig);
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    #[cfg(not(unix))]
+    fn forward_pending(&self, _pid: u32) -> bool {
+        false
     }
 }
 
@@ -259,9 +444,13 @@ impl SignalHold {
 impl Drop for SignalHold {
     fn drop(&mut self) {
         if let Some(previous) = self.previous {
-            // SAFETY: restores the mask saved by `new` on this thread.
+            // SAFETY: restores the mask saved by `new` on this thread, then
+            // re-raises a received signal if unblocking did not deliver it.
             unsafe {
                 libc::pthread_sigmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut());
+                if let Some(sig) = self.received.get() {
+                    libc::raise(sig);
+                }
             }
         }
     }

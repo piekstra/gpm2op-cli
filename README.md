@@ -17,8 +17,11 @@ Planned: 12 change(s) across the export (nothing was written).
 $ gpm2op sync ~/Downloads/GooglePasswords.csv
 Read 214 credential(s) from GooglePasswords.csv. Target vault: "Private".
 Done: 12 created, 0 updated, 0 unchanged, 202 left as-is, 0 failed.
-Deleted the export at GooglePasswords.csv: every row in it is in 1Password now.
+202 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager; run with --update to reconcile.
+Deleted the export at GooglePasswords.csv. Google Password Manager still holds every password in it, including the rows above that were not checked against 1Password.
 ```
+
+The `Read …` line and the notes are on stderr; the rest is stdout.
 
 ## Why passwords only
 
@@ -76,12 +79,25 @@ gpm2op self-update                             # update the binary in place
   untouched and reported as `unchanged`).
 - **`--dry-run`:** print the plan without writing anything. The export is kept.
 - **The export is deleted** after a sync in which no row failed, including one
-  that created nothing because every row was already in 1Password. When a row
-  fails, the export is kept and stderr says so; fix the cause and rerun, and the
-  clean rerun deletes it. `--keep-csv` keeps it regardless.
-- **`--json`:** stdout carries exactly one JSON document (`sync-result/v1`:
-  `summary` with the counts and `csv_deleted`, then `items`); progress and notes
-  go to stderr. `gpm2op --json check` gives `check-result/v1`.
+  that created nothing because every row matched an existing login. The export
+  is a copy: Google Password Manager still holds every password in it, so
+  deleting it loses nothing. When a row fails, the export is kept and stderr
+  says so; fix the cause and rerun, and the clean rerun deletes it.
+- **`--keep-csv`** keeps the export. A script that syncs the same file more
+  than once (a second vault, a later `--update`) passes it on every run but the
+  last.
+- **Rows not checked against 1Password are counted.** A row that matched an
+  existing login and was left as-is (default mode), a row with no username
+  matched to the only login on its site (which may be another account), and an
+  earlier duplicate of a later row's site and username are each counted, and
+  named on stderr in human mode. Before removing anything from Google Password
+  Manager, export again and run `--update` to reconcile them.
+- **Output streams:** results are on stdout; progress (`Read N credential(s)
+  …`) and notes are on stderr, in every mode.
+- **`--json`:** stdout carries exactly one JSON document. `sync` gives
+  `sync-result/v1`: `summary` with the counts, `csv_deleted`, and `unverified`
+  (`not_compared`, `host_only`, `deduped`), then `items`. `gpm2op --json check`
+  gives `check-result/v1` (`vault`, `logins`).
 
 ### How matching works
 
@@ -101,14 +117,18 @@ the source is short enough to audit end to end:
   arguments are visible to other processes. New items are created by piping a
   JSON template to `op item create -` (**stdin**); updates go through a
   `0600` temp file that's deleted as soon as `op` returns — when `op` fails
-  too, and when the run is interrupted (Ctrl-C, `SIGTERM`, `SIGHUP`) mid-edit.
-  No password is ever an argv.
+  too, and when the run is interrupted (Ctrl-C, `SIGTERM`, `SIGHUP`) mid-edit:
+  the signal is held until the file is gone and passed on to `op`. An edit
+  still running after `GPM2OP_EDIT_TIMEOUT` seconds (default 120; an
+  unanswered 1Password prompt) is stopped and its row fails. Only `SIGKILL`
+  can leave the file. No password is ever an argv.
 - **1Password stays the source of truth.** Every write is an `op` call; this
   tool stores nothing itself and keeps no state.
 - **It never prints your passwords** — not in tables, not in `--json`, not in
   errors.
 - **The tool deletes the CSV** once a non-dry-run sync finishes with no failed
-  rows, because it holds every password in plain text. It removes only the
+  rows, because it holds every password in plain text and Google Password
+  Manager keeps the originals. It removes only the
   regular file it read: a symlink, a directory, a pipe or `/dev/stdin` is left
   alone with a note on stderr, and so is a file that changed while the sync ran
   (it may hold rows the run did not read) or one with no usable rows (it may not
@@ -120,6 +140,8 @@ the source is short enough to audit end to end:
 gpm2op self-update --check   # is a newer release available?
 gpm2op self-update           # download it and replace the binary in place
 ```
+
+What changed in each version: [`CHANGELOG.md`](CHANGELOG.md).
 
 Releases are produced by pushing a version tag (`git tag v0.2.0 && git push
 origin v0.2.0`), which triggers the release workflow that builds the binaries

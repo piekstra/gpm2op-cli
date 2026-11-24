@@ -52,6 +52,35 @@ pub struct Summary {
     pub skipped_existing: usize,
     pub failed: usize,
     pub planned: usize,
+    pub unverified: Unverified,
+}
+
+/// Rows whose password this run did not check against 1Password, in three
+/// disjoint groups. Their passwords may exist only in Google Password Manager.
+/// A dry run counts the rows it would leave unverified.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Unverified {
+    /// Matched an existing login on host and username and were left as-is
+    /// without reading its password (default mode).
+    pub not_compared: usize,
+    /// Had no username and matched the only login on their host, which may
+    /// be another account. Counted whether that login was skipped or updated.
+    pub host_only: usize,
+    /// Repeated an earlier row's host and username; only the last was synced.
+    pub deduped: usize,
+}
+
+impl Unverified {
+    pub fn total(&self) -> usize {
+        self.not_compared + self.host_only + self.deduped
+    }
+}
+
+/// How a credential matched an existing login.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Match {
+    Exact,
+    HostOnly,
 }
 
 /// Index of existing login items keyed by normalized host → (username_lc, id).
@@ -77,18 +106,18 @@ impl Index {
     }
 
     /// Find an existing item id matching this credential's host+username.
-    fn find(&self, cred: &Credential) -> Option<String> {
+    fn find(&self, cred: &Credential) -> Option<(String, Match)> {
         let host = cred.host()?;
         let candidates = self.by_host.get(&host)?;
         let want = cred.username.to_lowercase();
         // Prefer an exact username match on the same host.
         if let Some((_, id)) = candidates.iter().find(|(u, _)| *u == want) {
-            return Some(id.clone());
+            return Some((id.clone(), Match::Exact));
         }
         // If the CSV row has no username and exactly one login exists for the
         // host, treat that as the match (avoids a duplicate).
         if want.is_empty() && candidates.len() == 1 {
-            return Some(candidates[0].1.clone());
+            return Some((candidates[0].1.clone(), Match::HostOnly));
         }
         None
     }
@@ -110,21 +139,43 @@ pub fn dedupe(creds: Vec<Credential>) -> Vec<Credential> {
     out
 }
 
+/// One credential's decided action, and how it matched.
+struct Step {
+    cred: Credential,
+    action: Action,
+    matched: Option<Match>,
+}
+
 /// Decide the action for each credential given the existing index.
-fn plan(creds: &[Credential], index: &Index, on_conflict: OnConflict) -> Vec<(Credential, Action)> {
+fn plan(creds: &[Credential], index: &Index, on_conflict: OnConflict) -> Vec<Step> {
     creds
         .iter()
         .map(|c| {
-            let action = match index.find(c) {
+            let found = index.find(c);
+            let matched = found.as_ref().map(|(_, m)| *m);
+            let action = match found {
                 None => Action::Create,
-                Some(id) => match on_conflict {
+                Some((id, _)) => match on_conflict {
                     OnConflict::Skip => Action::SkipExisting { id },
                     OnConflict::Update => Action::UpdatePassword { id },
                 },
             };
-            (c.clone(), action)
+            Step {
+                cred: c.clone(),
+                action,
+                matched,
+            }
         })
         .collect()
+}
+
+/// Add a row that did not fail to the unverified counts it belongs to.
+fn tally_unverified(unverified: &mut Unverified, step: &Step) {
+    match (step.matched, &step.action) {
+        (Some(Match::HostOnly), _) => unverified.host_only += 1,
+        (_, Action::SkipExisting { .. }) => unverified.not_compared += 1,
+        _ => {}
+    }
 }
 
 /// Run the sync end-to-end.
@@ -137,13 +188,16 @@ pub fn run(
 ) -> Result<(Vec<Outcome>, Summary)> {
     let existing = op.list_logins(vault)?;
     let index = Index::build(&existing);
+    let read = creds.len();
     let creds = dedupe(creds);
     let planned = plan(&creds, &index, on_conflict);
 
     let mut outcomes = Vec::with_capacity(planned.len());
     let mut summary = Summary::default();
+    summary.unverified.deduped = read - creds.len();
 
-    for (cred, action) in planned {
+    for step in planned {
+        let Step { cred, action, .. } = &step;
         let host = cred.host().unwrap_or_default();
         let kind = if dry_run {
             summary.planned += 1;
@@ -153,8 +207,11 @@ pub fn run(
                 Action::SkipExisting { .. } => OutcomeKind::Planned("skip"),
             }
         } else {
-            execute(op, vault, &cred, &action, &mut summary)
+            execute(op, vault, cred, action, &mut summary)
         };
+        if !matches!(kind, OutcomeKind::Failed(_)) {
+            tally_unverified(&mut summary.unverified, &step);
+        }
         outcomes.push(Outcome {
             title: cred.title.clone(),
             host,
@@ -280,8 +337,8 @@ mod tests {
             cred("gitlab.com", "jane", "pw"), // new
         ];
         let planned = plan(&creds, &index, OnConflict::Skip);
-        assert!(matches!(planned[0].1, Action::SkipExisting { .. }));
-        assert_eq!(planned[1].1, Action::Create);
+        assert!(matches!(planned[0].action, Action::SkipExisting { .. }));
+        assert_eq!(planned[1].action, Action::Create);
     }
 
     #[test]
@@ -290,7 +347,7 @@ mod tests {
         let index = Index::build(&existing);
         let creds = vec![cred("github.com", "bob", "pw")];
         let planned = plan(&creds, &index, OnConflict::Skip);
-        assert_eq!(planned[0].1, Action::Create);
+        assert_eq!(planned[0].action, Action::Create);
     }
 
     #[test]
@@ -299,7 +356,49 @@ mod tests {
         let index = Index::build(&existing);
         let creds = vec![cred("github.com", "jane", "newpw")];
         let planned = plan(&creds, &index, OnConflict::Update);
-        assert_eq!(planned[0].1, Action::UpdatePassword { id: "id1".into() });
+        assert_eq!(
+            planned[0].action,
+            Action::UpdatePassword { id: "id1".into() }
+        );
+    }
+
+    #[test]
+    fn an_empty_username_matches_the_only_login_on_its_host() {
+        let existing = vec![login("id1", "github.com", "jane")];
+        let index = Index::build(&existing);
+        let planned = plan(&[cred("github.com", "", "pw")], &index, OnConflict::Skip);
+        assert_eq!(planned[0].matched, Some(Match::HostOnly));
+        let mut unverified = Unverified::default();
+        tally_unverified(&mut unverified, &planned[0]);
+        assert_eq!(
+            unverified,
+            Unverified {
+                host_only: 1,
+                ..Unverified::default()
+            }
+        );
+    }
+
+    #[test]
+    fn unverified_groups_are_disjoint() {
+        let existing = vec![
+            login("id1", "github.com", "jane"),
+            login("id2", "gitlab.com", "jane"),
+        ];
+        let index = Index::build(&existing);
+        let creds = vec![
+            cred("github.com", "jane", "pw"),  // exact match, not compared
+            cred("gitlab.com", "", "pw"),      // host-only match
+            cred("example.com", "jane", "pw"), // created: verified
+        ];
+        for (mode, want_not_compared) in [(OnConflict::Skip, 1), (OnConflict::Update, 0)] {
+            let mut unverified = Unverified::default();
+            for step in plan(&creds, &index, mode) {
+                tally_unverified(&mut unverified, &step);
+            }
+            assert_eq!(unverified.not_compared, want_not_compared, "{mode:?}");
+            assert_eq!(unverified.host_only, 1, "{mode:?}");
+        }
     }
 
     #[test]

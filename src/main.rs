@@ -147,11 +147,11 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
             report::print_table(&outcomes);
         }
         report::print_summary(&summary, args.dry_run);
+        if !args.dry_run {
+            report::print_unverified(&summary.unverified);
+        }
         if disposal.deleted() {
-            println!(
-                "Deleted the export at {}: every row in it is in 1Password now.",
-                args.csv
-            );
+            println!("{}", report::deleted_line(&args.csv, &summary.unverified));
         }
     }
     note_kept(&args.csv, &disposal);

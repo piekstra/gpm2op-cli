@@ -31,17 +31,36 @@ CLI. Single binary crate. This file orients contributors/agents.
   field's value in the raw JSON, write to a **`0600` tempfile**
   (`tempfile` crate), `op item edit --template <file>`, then delete. See
   `sync::update_password` and `Op::edit_from_template`. `NamedTempFile`
-  deletes the file on drop (every return and a panic), and `op::SignalHold`
-  defers SIGINT/SIGTERM/SIGHUP/SIGQUIT while the file exists, so a Ctrl-C
-  mid-edit ends the run only after the file is gone. Only SIGKILL can leave it.
+  deletes the file on drop (every return and a panic). `op::SignalHold`
+  blocks SIGINT/SIGTERM/SIGHUP/SIGQUIT while the file exists, and its drop
+  delivers (or re-raises) a held one after the file is gone. `Op::run_held`
+  supervises `op item edit`: it polls for a held signal and forwards it to
+  `op`, since a signal sent to gpm2op alone (`kill`, `timeout`, launchd) never
+  reaches `op`; `op` gets 5 s to exit before it is killed, and is killed after
+  `GPM2OP_EDIT_TIMEOUT` seconds (default 120) in any case, failing the row.
+  The child inherits the blocked mask on spawn (std does not reset it on
+  macOS), so `SignalHold::release_in_child` restores the pre-hold mask in a
+  `pre_exec` hook. The mask is per thread: the hold assumes gpm2op is
+  single-threaded apart from the pipe readers started under it. Only SIGKILL
+  can leave the file.
 
 Never add an assignment-argument (`password=...`) code path.
 
 ## The export is deleted after a clean run
 
 The CSV holds every password in plain text, so `sync` removes it once a
-non-dry-run finishes with `failed == 0` (also when nothing was created: every
-row is already in 1Password). `export::may_delete` decides from the run's end,
+non-dry-run finishes with `failed == 0`, also when nothing was created.
+Deletion rests on Google Password Manager staying the source: the export is a
+copy, so removing it loses nothing. `failed == 0` does not mean every row is
+in 1Password, and nothing may claim it does unless `sync::Unverified` is all
+zero. It counts, in disjoint groups, the rows not checked against 1Password:
+`not_compared` (matched host + username and skipped without reading the
+password), `host_only` (empty username matched to the only login on the host,
+which may be another account; skipped or updated) and `deduped` (dropped by
+`dedupe`). `--json` reports them as `summary.unverified`; human mode prints a
+stderr line per group (`report::print_unverified`), and
+`report::deleted_line` says 1Password holds every credential only when the
+total is zero. `export::may_delete` decides from the run's end,
 `export::dispose` from the file:
 
 - Kept: `--dry-run`, `--keep-csv`, any failed row (so a rerun can retry; the
@@ -99,9 +118,11 @@ removal rules — all offline (no `op`).
 `tests/support/bin/op`, a shell stand-in for `op` that answers from
 `tests/fixtures/op/*.json` and logs each call's argv. PATH holds only that
 directory and the system's, so no test can reach the real `op` or raise a
-1Password prompt. They cover deleting and keeping the export, one JSON document
-on stdout, the `--update` template's `0600` mode and removal (on success, a
-failed edit, and SIGINT/SIGTERM mid-edit), and that no password reaches argv.
+1Password prompt. They cover deleting and keeping the export, the unverified
+counts and their notes, one JSON document on stdout, the `--update` template's
+`0600` mode and removal (on success, a failed edit, SIGINT/SIGTERM mid-edit, a
+SIGTERM sent to gpm2op alone while `op` sleeps, and an edit past
+`GPM2OP_EDIT_TIMEOUT`), and that no password reaches argv.
 Export fixtures are synthetic CSVs in `tests/fixtures/`.
 
 The real `op` write path still needs a manual check against a scratch vault
