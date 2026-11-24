@@ -165,6 +165,23 @@ fn a_failed_row_keeps_the_export_for_the_rerun() {
 }
 
 #[test]
+fn a_failed_row_reports_ops_message() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export-with-refused-row.csv");
+    let doc = one_json_document(&t.run(&["--json", "sync", s(&export)]));
+    let refused = doc["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|i| i["host"] == "fail.example")
+        .unwrap();
+    assert_eq!(
+        refused["result"],
+        "failed: [ERROR] 2026/01/01 00:00:00 the test refuses this item"
+    );
+}
+
+#[test]
 fn a_dry_run_keeps_the_export() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");

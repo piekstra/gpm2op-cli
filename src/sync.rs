@@ -231,8 +231,18 @@ fn update_password(op: &Op, id: &str, cred: &Credential) -> Result<bool> {
     Ok(true)
 }
 
+/// One line for a failed row. `op`'s own message is the cause, and its
+/// `Display` puts that message on the line after a header.
 fn short(e: &Error) -> String {
-    e.to_string().lines().next().unwrap_or("error").to_string()
+    let text = match e {
+        Error::Op(m) => m.clone(),
+        other => other.to_string(),
+    };
+    text.lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .unwrap_or("error")
+        .to_string()
 }
 
 #[cfg(test)]
@@ -290,6 +300,16 @@ mod tests {
         let creds = vec![cred("github.com", "jane", "newpw")];
         let planned = plan(&creds, &index, OnConflict::Update);
         assert_eq!(planned[0].1, Action::UpdatePassword { id: "id1".into() });
+    }
+
+    #[test]
+    fn a_failed_row_names_ops_message() {
+        let e = Error::Op("[ERROR] 2026/01/01 00:00:00 vault is read-only\nmore".into());
+        assert_eq!(short(&e), "[ERROR] 2026/01/01 00:00:00 vault is read-only");
+        assert_eq!(
+            short(&Error::Parse("bad json".into())),
+            "could not parse `op` output: bad json"
+        );
     }
 
     #[test]
