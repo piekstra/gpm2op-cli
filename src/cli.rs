@@ -43,7 +43,8 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct SyncArgs {
-    /// Path to the Chrome/Google Password Manager CSV export.
+    /// Path to the Chrome/Google Password Manager CSV export. It is deleted
+    /// after a sync with no failures (see --keep-csv).
     #[arg(value_name = "CSV")]
     pub csv: String,
 
@@ -52,13 +53,20 @@ pub struct SyncArgs {
     pub vault: String,
 
     /// Also update the stored password when an existing login's password
-    /// differs from the CSV (default: leave existing logins untouched).
+    /// differs from the CSV (default: leave existing logins untouched). Rows
+    /// with no username that match a login on host alone are never updated.
     #[arg(long)]
     pub update: bool,
 
-    /// Show what would happen without writing anything.
+    /// Show what would happen without writing anything. The export is kept.
     #[arg(long)]
     pub dry_run: bool,
+
+    /// Keep the CSV export on disk after the sync. By default it is deleted
+    /// once a run finishes with no failed rows, since it holds every password
+    /// in plain text.
+    #[arg(long)]
+    pub keep_csv: bool,
 
     /// Operate on a specific 1Password account (shorthand, sign-in address, or
     /// account ID). Omit if you have a single account.

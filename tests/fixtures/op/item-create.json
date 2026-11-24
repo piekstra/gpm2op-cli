@@ -1,0 +1,18 @@
+{
+  "id": "fixturecreated000000000001",
+  "title": "Example Org",
+  "version": 1,
+  "vault": {
+    "id": "fixturevault00000000000001",
+    "name": "Private"
+  },
+  "category": "LOGIN",
+  "created_at": "2026-01-01T00:00:00Z",
+  "updated_at": "2026-01-01T00:00:00Z",
+  "urls": [
+    {
+      "primary": true,
+      "href": "https://www.example.org/"
+    }
+  ]
+}

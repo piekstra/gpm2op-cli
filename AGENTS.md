@@ -19,7 +19,12 @@ make check   # fmt-check + clippy (-D warnings) + test + build — run before pu
 
 - Rust, `clap` derive; every write goes through the `op` CLI.
 - **Secrets never on argv:** item creates pipe a JSON template over stdin;
-  updates use a `0600` temp file. Never print a password.
+  updates use a `0600` temp file, removed on every exit path short of SIGKILL.
+  Never print a password.
+- **The export is deleted** after a sync with no failed rows (`--keep-csv`
+  opts out); any export left on disk gets a stderr note saying why. Rules in
+  [`CLAUDE.md`](CLAUDE.md).
+- **`--json` means one document on stdout.** Progress and notes go to stderr.
 - Put repo-specific guidance in `docs/development.md`, not here.
 
 ## The CLI family & cli-common
