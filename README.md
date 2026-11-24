@@ -15,7 +15,9 @@ Read 214 credential(s) from GooglePasswords.csv. Target vault: "Private" (dry ru
 Planned: 12 change(s) across the export (nothing was written).
 
 $ gpm2op sync ~/Downloads/GooglePasswords.csv
+Read 214 credential(s) from GooglePasswords.csv. Target vault: "Private".
 Done: 12 created, 0 updated, 0 unchanged, 202 left as-is, 0 failed.
+Deleted the export at GooglePasswords.csv: every row in it is in 1Password now.
 ```
 
 ## Why passwords only
@@ -51,7 +53,8 @@ cargo install --path .        # installs the `gpm2op` binary
   **Export passwords**.
 
 You'll get a CSV with the header `name,url,username,password,note`. **It's plain
-text** — delete it once you've synced (the tool reminds you).
+text**, so `gpm2op sync` deletes it once a run finishes with no failed rows (see
+[Security](#security)).
 
 ## Usage
 
@@ -61,6 +64,7 @@ gpm2op sync passwords.csv --dry-run            # preview: what would change
 gpm2op sync passwords.csv                      # create missing logins
 gpm2op sync passwords.csv --update             # also fix changed passwords
 gpm2op sync passwords.csv --vault "Personal"   # choose a vault (default: Private)
+gpm2op sync passwords.csv --keep-csv           # leave the export on disk afterwards
 gpm2op sync passwords.csv --json               # machine-readable summary
 gpm2op self-update                             # update the binary in place
 ```
@@ -70,7 +74,14 @@ gpm2op self-update                             # update the binary in place
 - **`--update`:** additionally reconcile — for a login that already exists, if
   the CSV password differs, update it (only then; identical passwords are left
   untouched and reported as `unchanged`).
-- **`--dry-run`:** print the plan without writing anything.
+- **`--dry-run`:** print the plan without writing anything. The export is kept.
+- **The export is deleted** after a sync in which no row failed, including one
+  that created nothing because every row was already in 1Password. When a row
+  fails, the export is kept and stderr says so; fix the cause and rerun, and the
+  clean rerun deletes it. `--keep-csv` keeps it regardless.
+- **`--json`:** stdout carries exactly one JSON document (`sync-result/v1`:
+  `summary` with the counts and `csv_deleted`, then `items`); progress and notes
+  go to stderr. `gpm2op --json check` gives `check-result/v1`.
 
 ### How matching works
 
@@ -89,13 +100,19 @@ the source is short enough to audit end to end:
 - **Secrets never go on the command line.** `op` itself warns that command
   arguments are visible to other processes. New items are created by piping a
   JSON template to `op item create -` (**stdin**); updates go through a
-  `0600` temp file that's deleted immediately. No password is ever an argv.
+  `0600` temp file that's deleted as soon as `op` returns — when `op` fails
+  too, and when the run is interrupted (Ctrl-C, `SIGTERM`, `SIGHUP`) mid-edit.
+  No password is ever an argv.
 - **1Password stays the source of truth.** Every write is an `op` call; this
   tool stores nothing itself and keeps no state.
 - **It never prints your passwords** — not in tables, not in `--json`, not in
   errors.
-- **Delete the CSV** when you're done; it's plaintext. The tool reminds you
-  after any create.
+- **The tool deletes the CSV** once a non-dry-run sync finishes with no failed
+  rows, because it holds every password in plain text. It removes only the
+  regular file it read: a symlink, a directory, a pipe or `/dev/stdin` is left
+  alone with a note on stderr, and so is a file that changed while the sync ran
+  (it may hold rows the run did not read) or one with no usable rows (it may not
+  be a password export). Anything left on disk is yours to delete.
 
 ## Updating
 
@@ -111,7 +128,7 @@ origin v0.2.0`), which triggers the release workflow that builds the binaries
 ## Development
 
 ```bash
-cargo test                       # parsing, matching, dedupe, templates
+cargo test                       # unit tests, plus end-to-end runs against a stand-in op
 cargo clippy --all-targets -- -D warnings
 cargo fmt --all
 ```

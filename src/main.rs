@@ -4,6 +4,7 @@ mod chrome;
 mod cli;
 mod credential;
 mod error;
+mod export;
 mod op;
 mod report;
 mod selfupdate;
@@ -49,7 +50,7 @@ fn to_cli_error(err: &error::Error) -> pk_cli_core::CliError {
 fn run(cli: Cli) -> error::Result<ExitCode> {
     let json = cli.json;
     match cli.command {
-        Command::Check(args) => check(args),
+        Command::Check(args) => check(args, json),
         Command::Sync(mut args) => {
             args.json |= json;
             do_sync(args)
@@ -79,15 +80,19 @@ fn run(cli: Cli) -> error::Result<ExitCode> {
     }
 }
 
-fn check(args: CheckArgs) -> error::Result<ExitCode> {
+fn check(args: CheckArgs, json: bool) -> error::Result<ExitCode> {
     let op = Op::new(args.account);
     op.preflight()?;
     let logins = op.list_logins(&args.vault)?;
-    println!(
-        "✓ op is installed and signed in. Vault \"{}\" has {} login item(s).",
-        args.vault,
-        logins.len()
-    );
+    if json {
+        report::print_check_json(&args.vault, logins.len());
+    } else {
+        println!(
+            "✓ op is installed and signed in. Vault \"{}\" has {} login item(s).",
+            args.vault,
+            logins.len()
+        );
+    }
     Ok(ExitCode::SUCCESS)
 }
 
@@ -96,10 +101,26 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
     // Fail early with a clear message if op isn't usable.
     op.preflight()?;
 
-    let rows = chrome::read_csv(Path::new(&args.csv))?;
+    let path = Path::new(&args.csv);
+    let read = export::Snapshot::of(path);
+    let rows = chrome::read_csv(path)?;
     let creds: Vec<Credential> = rows.into_iter().map(Credential::from).collect();
+    let total = creds.len();
+    let end = |failed| export::RunEnd {
+        dry_run: args.dry_run,
+        keep_csv: args.keep_csv,
+        credentials: total,
+        failed,
+    };
+
     if creds.is_empty() {
-        println!("No usable credentials found in {}.", args.csv);
+        let disposal = export::dispose(path, read.as_ref(), end(0));
+        if args.json {
+            report::print_json(&[], &sync::Summary::default(), disposal.deleted());
+        } else {
+            println!("No usable credentials found in {}.", args.csv);
+        }
+        note_kept(&args.csv, &disposal);
         return Ok(ExitCode::SUCCESS);
     }
 
@@ -109,8 +130,7 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
         OnConflict::Skip
     };
 
-    let total = creds.len();
-    println!(
+    eprintln!(
         "Read {total} credential(s) from {}. Target vault: \"{}\"{}.",
         args.csv,
         args.vault,
@@ -118,26 +138,36 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
     );
 
     let (outcomes, summary) = sync::run(&op, &args.vault, creds, on_conflict, args.dry_run)?;
+    let disposal = export::dispose(path, read.as_ref(), end(summary.failed));
 
     if args.json {
-        report::print_json(&outcomes, &summary);
+        report::print_json(&outcomes, &summary, disposal.deleted());
     } else {
         if args.verbose || args.dry_run {
             report::print_table(&outcomes);
         }
         report::print_summary(&summary, args.dry_run);
-        if !args.dry_run && summary.created > 0 {
-            eprintln!(
-                "\nReminder: the CSV export at {} contains your passwords in plain text. \
-                 Delete it now that they're in 1Password.",
+        if disposal.deleted() {
+            println!(
+                "Deleted the export at {}: every row in it is in 1Password now.",
                 args.csv
             );
         }
     }
+    note_kept(&args.csv, &disposal);
 
     Ok(if summary.failed > 0 {
         ExitCode::FAILURE
     } else {
         ExitCode::SUCCESS
     })
+}
+
+/// Say on stderr why the export is still on disk, in every output mode.
+fn note_kept(csv: &str, disposal: &export::Disposal) {
+    if let export::Disposal::Kept(kept) = disposal {
+        if let Some(note) = export::kept_note(csv, kept) {
+            eprintln!("{note}");
+        }
+    }
 }

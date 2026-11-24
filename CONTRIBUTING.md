@@ -15,7 +15,8 @@ welcome.
 
 1. Branch off `main`.
 2. Add a test where it makes sense (parsing/matching/dedupe have inline
-   `#[cfg(test)]` tests — all offline, no `op`).
+   `#[cfg(test)]` tests; `tests/sync_export.rs` runs the binary against a
+   stand-in `op`. All offline, never the real `op`).
 3. Run `make check`.
 4. Open a PR describing the change and how you verified it.
 

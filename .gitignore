@@ -14,3 +14,6 @@ Chrome Passwords.csv
 
 # macOS
 .DS_Store
+
+# Synthetic test fixtures are the one exception: they hold no real credential.
+!tests/fixtures/*.csv

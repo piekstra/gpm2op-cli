@@ -192,8 +192,11 @@ impl Op {
     }
 
     /// Replace an item from a full JSON template written to a `0600` temp file.
-    /// The file is removed as soon as `op` returns.
+    /// The file is removed as soon as `op` returns: `NamedTempFile` deletes it
+    /// when dropped, on every return and on a panic, and `SignalHold` keeps a
+    /// Ctrl-C from ending the process before that drop runs.
     pub fn edit_from_template(&self, id: &str, template_json: &str) -> Result<()> {
+        let hold = SignalHold::new();
         let mut tmp = tempfile::Builder::new()
             .prefix("gpm2op-")
             .suffix(".json")
@@ -212,8 +215,54 @@ impl Op {
             ],
             None,
         );
-        // Explicitly drop (delete) the temp file regardless of outcome.
         drop(tmp);
+        drop(hold);
         res.map(|_| ())
+    }
+}
+
+/// Defers SIGINT, SIGTERM, SIGHUP and SIGQUIT while it lives. A signal that
+/// arrives meanwhile is delivered when the hold drops, so the process still
+/// ends, but only after the revealed item's temp file is gone. `op` still gets
+/// the signal: std clears the signal mask of every child it spawns.
+struct SignalHold {
+    #[cfg(unix)]
+    previous: Option<libc::sigset_t>,
+}
+
+impl SignalHold {
+    #[cfg(unix)]
+    fn new() -> SignalHold {
+        // SAFETY: sigemptyset/sigaddset only write the local set, and
+        // pthread_sigmask reads it and writes the previous mask into a local.
+        unsafe {
+            let mut set: libc::sigset_t = std::mem::zeroed();
+            libc::sigemptyset(&mut set);
+            for sig in [libc::SIGINT, libc::SIGTERM, libc::SIGHUP, libc::SIGQUIT] {
+                libc::sigaddset(&mut set, sig);
+            }
+            let mut previous: libc::sigset_t = std::mem::zeroed();
+            let ok = libc::pthread_sigmask(libc::SIG_BLOCK, &set, &mut previous) == 0;
+            SignalHold {
+                previous: ok.then_some(previous),
+            }
+        }
+    }
+
+    #[cfg(not(unix))]
+    fn new() -> SignalHold {
+        SignalHold {}
+    }
+}
+
+#[cfg(unix)]
+impl Drop for SignalHold {
+    fn drop(&mut self) {
+        if let Some(previous) = self.previous {
+            // SAFETY: restores the mask saved by `new` on this thread.
+            unsafe {
+                libc::pthread_sigmask(libc::SIG_SETMASK, &previous, std::ptr::null_mut());
+            }
+        }
     }
 }

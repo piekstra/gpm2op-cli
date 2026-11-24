@@ -47,7 +47,7 @@ pub fn print_summary(summary: &Summary, dry_run: bool) {
     );
 }
 
-pub fn print_json(outcomes: &[Outcome], summary: &Summary) {
+pub fn print_json(outcomes: &[Outcome], summary: &Summary, csv_deleted: bool) {
     let items: Vec<_> = outcomes
         .iter()
         .map(|o| {
@@ -60,6 +60,7 @@ pub fn print_json(outcomes: &[Outcome], summary: &Summary) {
         })
         .collect();
     let doc = serde_json::json!({
+        "schema": "sync-result/v1",
         "summary": {
             "created": summary.created,
             "updated": summary.updated,
@@ -67,10 +68,19 @@ pub fn print_json(outcomes: &[Outcome], summary: &Summary) {
             "skipped_existing": summary.skipped_existing,
             "failed": summary.failed,
             "planned": summary.planned,
+            "csv_deleted": csv_deleted,
         },
         "items": items,
     });
-    println!("{}", serde_json::to_string_pretty(&doc).unwrap());
+    pk_cli_core::output::json(&doc);
+}
+
+pub fn print_check_json(vault: &str, logins: usize) {
+    pk_cli_core::output::json(&serde_json::json!({
+        "schema": "check-result/v1",
+        "vault": vault,
+        "logins": logins,
+    }));
 }
 
 fn label(kind: &OutcomeKind) -> String {

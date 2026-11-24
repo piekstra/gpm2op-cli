@@ -440,13 +440,14 @@ dependencies = [
 
 [[package]]
 name = "gpm2op"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "anyhow",
  "clap",
  "clap_complete",
  "comfy-table",
  "csv",
+ "libc",
  "pk-cli-core",
  "pk-cli-selfupdate",
  "serde",

@@ -1,7 +1,7 @@
 [package]
 name = "gpm2op"
 description = "Idempotently upsert Google/Chrome Password Manager exports into 1Password via the op CLI."
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 rust-version = "1.82"
 license = "MIT"
@@ -25,6 +25,9 @@ tempfile = "3"
 clap_complete = "4"
 pk-cli-core = { git = "https://github.com/piekstra/cli-common", tag = "v0.1.2" }
 pk-cli-selfupdate = { git = "https://github.com/piekstra/cli-common", tag = "v0.1.2" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [profile.release]
 strip = true

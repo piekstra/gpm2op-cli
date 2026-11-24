@@ -5,8 +5,8 @@ CLI. Single binary crate. This file orients contributors/agents.
 
 ## Module map
 
-- `main.rs` — clap dispatch (`sync`, `check`), exit codes, the "delete your CSV"
-  reminder.
+- `main.rs` — clap dispatch (`sync`, `check`), exit codes, and which stream
+  each line goes to.
 - `cli.rs` — clap-derive command/flags.
 - `chrome.rs` — parse the export CSV. Columns are located by **header name**
   (case-insensitive), so column order and short rows are tolerated.
@@ -16,6 +16,8 @@ CLI. Single binary crate. This file orients contributors/agents.
   `op item list/get` JSON we use.
 - `sync.rs` — the engine: build an index of existing logins, plan an action per
   credential, execute, and tally a `Summary`.
+- `export.rs` — removes the export after a run with no failed rows, and the
+  stderr note for an export left on disk.
 - `report.rs` — table / JSON / summary rendering.
 - `error.rs` — error type, incl. friendly `OpMissing` / `OpNotSignedIn`.
 
@@ -28,9 +30,36 @@ CLI. Single binary crate. This file orients contributors/agents.
 - **Update:** `op item get --reveal --format json`, patch only the `PASSWORD`
   field's value in the raw JSON, write to a **`0600` tempfile**
   (`tempfile` crate), `op item edit --template <file>`, then delete. See
-  `sync::update_password` and `Op::edit_from_template`.
+  `sync::update_password` and `Op::edit_from_template`. `NamedTempFile`
+  deletes the file on drop (every return and a panic), and `op::SignalHold`
+  defers SIGINT/SIGTERM/SIGHUP/SIGQUIT while the file exists, so a Ctrl-C
+  mid-edit ends the run only after the file is gone. Only SIGKILL can leave it.
 
 Never add an assignment-argument (`password=...`) code path.
+
+## The export is deleted after a clean run
+
+The CSV holds every password in plain text, so `sync` removes it once a
+non-dry-run finishes with `failed == 0` (also when nothing was created: every
+row is already in 1Password). `export::may_delete` decides from the run's end,
+`export::dispose` from the file:
+
+- Kept: `--dry-run`, `--keep-csv`, any failed row (so a rerun can retry; the
+  clean rerun deletes it), and an export with no usable rows (it may not be a
+  password export at all).
+- Only the regular file that was read is removed. `Snapshot` records its length
+  and mtime before the read; a symlink, directory, pipe or `/dev/stdin`, or a
+  file that changed during the run, is left alone.
+- Every kept export except a dry run's gets a stderr note
+  (`export::kept_note`), in human and `--json` mode alike. `--json` reports
+  `summary.csv_deleted`.
+
+## Output streams
+
+stdout carries results only; progress ("Read N credential(s)…") and notes go to
+stderr. Under `--json` stdout is exactly one document (piekstra-cli/1):
+`sync-result/v1`, `check-result/v1`, `cli-info/v1`, `self-update/v1`, or the
+family error shape.
 
 ## Matching & idempotency
 
@@ -63,9 +92,20 @@ place. Assets are matched by Rust target triple, so the release workflow
 ## Testing
 
 Unit tests cover CSV parsing (incl. short/missing-note rows), host
-normalization, template shape, matching/plan decisions, and dedupe — all offline
-(no `op`). The live write path can't be unit-tested without an `op` session;
-verify it manually with `op item create --dry-run -` and a scratch vault.
+normalization, template shape, matching/plan decisions, dedupe, and the export
+removal rules — all offline (no `op`).
+
+`tests/sync_export.rs` runs the built binary end to end against
+`tests/support/bin/op`, a shell stand-in for `op` that answers from
+`tests/fixtures/op/*.json` and logs each call's argv. PATH holds only that
+directory and the system's, so no test can reach the real `op` or raise a
+1Password prompt. They cover deleting and keeping the export, one JSON document
+on stdout, the `--update` template's `0600` mode and removal (on success, a
+failed edit, and SIGINT/SIGTERM mid-edit), and that no password reaches argv.
+Export fixtures are synthetic CSVs in `tests/fixtures/`.
+
+The real `op` write path still needs a manual check against a scratch vault
+(`op item create --dry-run -`).
 
 ```bash
 cargo test
