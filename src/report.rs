@@ -73,6 +73,7 @@ pub fn print_json(outcomes: &[Outcome], summary: &Summary, csv_deleted: bool) {
                 "not_compared": summary.unverified.not_compared,
                 "host_only": summary.unverified.host_only,
                 "deduped": summary.unverified.deduped,
+                "unreadable": summary.unverified.unreadable,
             },
         },
         "items": items,
@@ -111,6 +112,13 @@ fn unverified_notes(u: &Unverified) -> Vec<String> {
             "{} row(s) repeated a later row's site and username, and only the later row was \
              synced. The earlier passwords are still in Google Password Manager.",
             u.deduped
+        ));
+    }
+    if u.unreadable > 0 {
+        notes.push(format!(
+            "{} row(s) had no URL and no username, so they were not synced. Any password in \
+             them is still in Google Password Manager.",
+            u.unreadable
         ));
     }
     notes
@@ -158,12 +166,14 @@ mod tests {
             not_compared: 3,
             host_only: 2,
             deduped: 1,
+            unreadable: 4,
         });
-        assert_eq!(notes.len(), 3);
+        assert_eq!(notes.len(), 4);
         assert!(notes[0].starts_with("3 row(s) matched an existing login and were not compared"));
         assert!(notes[0].contains("run with --update to reconcile"));
         assert!(notes[1].starts_with("2 row(s) had no username"));
         assert!(notes[2].starts_with("1 row(s) repeated a later row's"));
+        assert!(notes[3].starts_with("4 row(s) had no URL and no username"));
     }
 
     #[test]

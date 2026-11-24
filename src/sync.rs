@@ -69,11 +69,14 @@ pub struct Unverified {
     pub host_only: usize,
     /// Repeated an earlier row's host and username; only the last was synced.
     pub deduped: usize,
+    /// Had neither a URL nor a username, so `chrome::read_csv` dropped them
+    /// before the sync. Set by the caller, which holds that count.
+    pub unreadable: usize,
 }
 
 impl Unverified {
     pub fn total(&self) -> usize {
-        self.not_compared + self.host_only + self.deduped
+        self.not_compared + self.host_only + self.deduped + self.unreadable
     }
 }
 

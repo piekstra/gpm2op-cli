@@ -92,16 +92,16 @@ gpm2op self-update                             # update the binary in place
 - **Rows not checked against 1Password are counted.** A row that matched an
   existing login and was left as-is (default mode), a row with no username
   matched to the only login on its site by host alone (which may be another
-  account, so it is never updated, `--update` included), and an earlier
-  duplicate of a later row's site and username are each counted, and named on
-  stderr in human mode. Before removing anything from Google Password Manager,
+  account, so it is never updated, `--update` included), an earlier duplicate
+  of a later row's site and username, and a row with no URL and no username
+  (not synced at all) are each counted, and named on stderr in human mode. Before removing anything from Google Password Manager,
   export again and run `--update` to reconcile the first group, and check the
   `host_only` logins in 1Password by hand.
 - **Output streams:** results are on stdout; progress (`Read N credential(s)
   …`) and notes are on stderr, in every mode.
 - **`--json`:** stdout carries exactly one JSON document. `sync` gives
   `sync-result/v1`: `summary` with the counts, `csv_deleted`, and `unverified`
-  (`not_compared`, `host_only`, `deduped`), then `items`. `gpm2op --json check`
+  (`not_compared`, `host_only`, `deduped`, `unreadable`), then `items`. `gpm2op --json check`
   gives `check-result/v1` (`vault`, `logins`).
 
 ### How matching works
@@ -125,7 +125,9 @@ the source is short enough to audit end to end:
   too, and when the run is interrupted (Ctrl-C, `SIGTERM`, `SIGHUP`) mid-edit:
   the signal is held until the file is gone and passed on to `op`. An edit
   still running after `GPM2OP_EDIT_TIMEOUT` seconds (default 120; an
-  unanswered 1Password prompt) is stopped and its row fails. Only `SIGKILL`
+  unanswered 1Password prompt) is stopped and its row fails. A value that is
+  not a whole number of seconds above 0 gets a warning on stderr and the
+  default. Only `SIGKILL`
   can leave the file. No password is ever an argv.
 - **1Password stays the source of truth.** Every write is an `op` call; this
   tool stores nothing itself and keeps no state.
@@ -148,9 +150,10 @@ gpm2op self-update           # download it and replace the binary in place
 
 What changed in each version: [`CHANGELOG.md`](CHANGELOG.md).
 
-Releases are produced by pushing a version tag (`git tag v0.2.0 && git push
-origin v0.2.0`), which triggers the release workflow that builds the binaries
-`self-update` pulls. Package-manager installs should upgrade via that manager.
+Releases are produced by pushing a version tag, which triggers the release
+workflow that builds the binaries `self-update` pulls; see
+[Releasing](docs/development.md#releasing). Package-manager installs should
+upgrade via that manager.
 
 ## Development
 

@@ -53,7 +53,8 @@ pub struct SyncArgs {
     pub vault: String,
 
     /// Also update the stored password when an existing login's password
-    /// differs from the CSV (default: leave existing logins untouched).
+    /// differs from the CSV (default: leave existing logins untouched). Rows
+    /// with no username that match a login on host alone are never updated.
     #[arg(long)]
     pub update: bool,
 

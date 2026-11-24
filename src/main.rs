@@ -103,8 +103,9 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
 
     let path = Path::new(&args.csv);
     let read = export::Snapshot::of(path);
-    let rows = chrome::read_csv(path)?;
-    let creds: Vec<Credential> = rows.into_iter().map(Credential::from).collect();
+    let export = chrome::read_csv(path)?;
+    let unreadable = export.unreadable;
+    let creds: Vec<Credential> = export.rows.into_iter().map(Credential::from).collect();
     let total = creds.len();
     let end = |failed| export::RunEnd {
         dry_run: args.dry_run,
@@ -115,10 +116,13 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
 
     if creds.is_empty() {
         let disposal = export::dispose(path, read.as_ref(), end(0));
+        let mut summary = sync::Summary::default();
+        summary.unverified.unreadable = unreadable;
         if args.json {
-            report::print_json(&[], &sync::Summary::default(), disposal.deleted());
+            report::print_json(&[], &summary, disposal.deleted());
         } else {
             println!("No usable credentials found in {}.", args.csv);
+            report::print_unverified(&summary.unverified);
         }
         note_kept(&args.csv, &disposal);
         return Ok(ExitCode::SUCCESS);
@@ -137,7 +141,8 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
         if args.dry_run { " (dry run)" } else { "" }
     );
 
-    let (outcomes, summary) = sync::run(&op, &args.vault, creds, on_conflict, args.dry_run)?;
+    let (outcomes, mut summary) = sync::run(&op, &args.vault, creds, on_conflict, args.dry_run)?;
+    summary.unverified.unreadable = unreadable;
     let disposal = export::dispose(path, read.as_ref(), end(summary.failed));
 
     if args.json {

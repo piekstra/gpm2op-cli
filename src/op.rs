@@ -10,6 +10,7 @@ use serde::Deserialize;
 use std::cell::Cell;
 use std::io::{Read, Write};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::OnceLock;
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
@@ -278,13 +279,37 @@ const STOP_GRACE: Duration = Duration::from_secs(5);
 const POLL: Duration = Duration::from_millis(20);
 
 /// How long `op item edit` may run: `GPM2OP_EDIT_TIMEOUT` seconds, else 120.
+/// A value that is set but rejected gets one stderr warning per run.
 fn edit_timeout() -> Duration {
-    std::env::var("GPM2OP_EDIT_TIMEOUT")
-        .ok()
-        .and_then(|v| v.trim().parse::<u64>().ok())
-        .filter(|&secs| secs > 0)
-        .map(Duration::from_secs)
-        .unwrap_or(DEFAULT_EDIT_TIMEOUT)
+    static TIMEOUT: OnceLock<Duration> = OnceLock::new();
+    *TIMEOUT.get_or_init(|| {
+        let raw = std::env::var_os("GPM2OP_EDIT_TIMEOUT");
+        let raw = raw.as_ref().map(|v| v.to_string_lossy());
+        match parse_edit_timeout(raw.as_deref()) {
+            Ok(limit) => limit,
+            Err(rejected) => {
+                eprintln!(
+                    "warning: GPM2OP_EDIT_TIMEOUT={rejected:?} is not a whole number of seconds \
+                     above 0; using the default of {} s.",
+                    DEFAULT_EDIT_TIMEOUT.as_secs()
+                );
+                DEFAULT_EDIT_TIMEOUT
+            }
+        }
+    })
+}
+
+/// The edit bound from `GPM2OP_EDIT_TIMEOUT`'s value: unset means the
+/// default; a whole number of seconds above 0, surrounding whitespace
+/// allowed, is taken; anything else comes back as `Err` with the value.
+fn parse_edit_timeout(raw: Option<&str>) -> std::result::Result<Duration, String> {
+    let Some(raw) = raw else {
+        return Ok(DEFAULT_EDIT_TIMEOUT);
+    };
+    match raw.trim().parse::<u64>() {
+        Ok(secs) if secs > 0 => Ok(Duration::from_secs(secs)),
+        _ => Err(raw.to_string()),
+    }
 }
 
 fn drain<R: Read + Send + 'static>(mut pipe: R) -> JoinHandle<Vec<u8>> {
@@ -452,6 +477,28 @@ impl Drop for SignalHold {
                     libc::raise(sig);
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn edit_timeout_takes_whole_seconds_above_zero_and_rejects_the_rest() {
+        let cases: [(Option<&str>, std::result::Result<u64, &str>); 7] = [
+            (None, Ok(120)),
+            (Some("1"), Ok(1)),
+            (Some(" 5 "), Ok(5)),
+            (Some("0"), Err("0")),
+            (Some("abc"), Err("abc")),
+            (Some("-1"), Err("-1")),
+            (Some(""), Err("")),
+        ];
+        for (raw, want) in cases {
+            let got = parse_edit_timeout(raw).map(|d| d.as_secs());
+            assert_eq!(got, want.map_err(str::to_string), "{raw:?}");
         }
     }
 }

@@ -168,10 +168,51 @@ fn rows_not_checked_against_1password_are_counted_and_named() {
     let doc = one_json_document(&t.run(&["--json", "sync", s(&export)]));
     assert_eq!(
         doc["summary"]["unverified"],
-        serde_json::json!({"not_compared": 1, "host_only": 1, "deduped": 1})
+        serde_json::json!({"not_compared": 1, "host_only": 1, "deduped": 1, "unreadable": 0})
     );
     assert_eq!(doc["summary"]["created"], 1);
     assert_eq!(doc["summary"]["csv_deleted"], true);
+}
+
+#[test]
+fn a_row_with_no_url_and_no_username_is_counted_as_unreadable() {
+    // Every other row is created, so only the dropped row keeps the
+    // deletion line from claiming 1Password holds everything.
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export-unreadable-row.csv");
+    let out = t
+        .command(&["sync", s(&export)])
+        .env("FAKE_OP_ITEM_LIST", "item-list-empty.json")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("Done: 1 created"), "{}", stdout(&out));
+    assert!(
+        stderr(&out).contains("1 row(s) had no URL and no username, so they were not synced"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        !stdout(&out).contains("is in 1Password now"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(
+        stdout(&out).contains("Google Password Manager still holds every password in it"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(!export.exists());
+
+    let export = t.export("google-passwords-export-unreadable-row.csv");
+    let doc = one_json_document(
+        &t.command(&["--json", "sync", s(&export)])
+            .env("FAKE_OP_ITEM_LIST", "item-list-empty.json")
+            .output()
+            .unwrap(),
+    );
+    assert_eq!(doc["summary"]["unverified"]["unreadable"], 1);
+    assert_eq!(doc["summary"]["created"], 1);
 }
 
 #[test]
@@ -378,6 +419,20 @@ fn update_hands_op_a_0600_template_and_removes_it() {
 }
 
 #[test]
+fn a_rejected_edit_timeout_warns_once_and_uses_the_default() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t
+        .command(&["sync", s(&export), "--update"])
+        .env("GPM2OP_EDIT_TIMEOUT", "2m")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let warning = "warning: GPM2OP_EDIT_TIMEOUT=\"2m\" is not a whole number of seconds above 0; using the default of 120 s.";
+    assert_eq!(stderr(&out).matches(warning).count(), 1, "{}", stderr(&out));
+}
+
+#[test]
 fn update_removes_its_template_when_op_edit_fails() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
@@ -465,6 +520,9 @@ fn a_sigterm_to_gpm2op_alone_reaches_op_and_removes_the_template() {
         std::thread::sleep(Duration::from_millis(20));
     }
     let signalled = Instant::now();
+    // SAFETY: kill only sends a signal. The pid is this test's own child,
+    // still running and not yet reaped (wait_within reaps it below), so it
+    // cannot name another process.
     unsafe {
         libc::kill(child.id() as libc::pid_t, libc::SIGTERM);
     }

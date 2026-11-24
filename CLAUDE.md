@@ -37,7 +37,8 @@ CLI. Single binary crate. This file orients contributors/agents.
   supervises `op item edit`: it polls for a held signal and forwards it to
   `op`, since a signal sent to gpm2op alone (`kill`, `timeout`, launchd) never
   reaches `op`; `op` gets 5 s to exit before it is killed, and is killed after
-  `GPM2OP_EDIT_TIMEOUT` seconds (default 120) in any case, failing the row.
+  `GPM2OP_EDIT_TIMEOUT` seconds (default 120) in any case, failing the row
+  (`parse_edit_timeout`; a rejected value warns once and uses the default).
   The child inherits the blocked mask on spawn (std does not reset it on
   macOS), so `SignalHold::release_in_child` restores the pre-hold mask in a
   `pre_exec` hook. The mask is per thread: the hold assumes gpm2op is
@@ -56,8 +57,9 @@ in 1Password, and nothing may claim it does unless `sync::Unverified` is all
 zero. It counts, in disjoint groups, the rows not checked against 1Password:
 `not_compared` (matched host + username and skipped without reading the
 password), `host_only` (empty username matched to the only login on the host,
-which may be another account; always skipped, `--update` included) and `deduped` (dropped by
-`dedupe`). `--json` reports them as `summary.unverified`; human mode prints a
+which may be another account; always skipped, `--update` included),
+`deduped` (dropped by `dedupe`) and `unreadable` (no URL and no username, so
+`chrome::read_csv` dropped them; `main` sets this count). `--json` reports them as `summary.unverified`; human mode prints a
 stderr line per group (`report::print_unverified`), and
 `report::deleted_line` says 1Password holds every credential only when the
 total is zero. `export::may_delete` decides from the run's end,

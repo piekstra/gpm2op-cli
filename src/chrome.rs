@@ -24,12 +24,21 @@ impl CsvRow {
     }
 }
 
+/// A parsed export: the rows worth importing, and how many were dropped.
+#[derive(Debug)]
+pub struct Export {
+    pub rows: Vec<CsvRow>,
+    /// Rows with neither a URL nor a username. They are not synced, though
+    /// one may still carry a password.
+    pub unreadable: usize,
+}
+
 /// Read and parse a Chrome/Google CSV export.
 ///
 /// Columns are located by header name (case-insensitive), so column order and
 /// short rows are both tolerated. The expected headers are
 /// `name,url,username,password,note`.
-pub fn read_csv(path: &Path) -> Result<Vec<CsvRow>> {
+pub fn read_csv(path: &Path) -> Result<Export> {
     let mut reader = csv::ReaderBuilder::new()
         .flexible(true)
         .has_headers(true)
@@ -56,6 +65,7 @@ pub fn read_csv(path: &Path) -> Result<Vec<CsvRow>> {
     };
 
     let mut rows = Vec::new();
+    let mut unreadable = 0;
     for (i, rec) in reader.records().enumerate() {
         let rec = rec.map_err(|e| Error::Csv(format!("row {}: {e}", i + 1)))?;
         let row = CsvRow {
@@ -67,9 +77,11 @@ pub fn read_csv(path: &Path) -> Result<Vec<CsvRow>> {
         };
         if row.is_meaningful() {
             rows.push(row);
+        } else {
+            unreadable += 1;
         }
     }
-    Ok(rows)
+    Ok(Export { rows, unreadable })
 }
 
 #[cfg(test)]
@@ -92,8 +104,10 @@ mod tests {
              Empty,,,,\n\
              GitHub,https://github.com,jane,pw\n",
         );
-        let rows = read_csv(f.path()).unwrap();
-        // The all-empty row is dropped.
+        let export = read_csv(f.path()).unwrap();
+        // The row with no URL and no username is dropped, and counted.
+        assert_eq!(export.unreadable, 1);
+        let rows = export.rows;
         assert_eq!(rows.len(), 2);
         assert_eq!(rows[0].name, "Example");
         assert_eq!(rows[0].username, "jane@example.com");
@@ -105,7 +119,7 @@ mod tests {
     #[test]
     fn tolerates_missing_note_column() {
         let f = write_tmp("name,url,username,password\nX,https://x.com,u,p\n");
-        let rows = read_csv(f.path()).unwrap();
+        let rows = read_csv(f.path()).unwrap().rows;
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].password, "p");
     }
