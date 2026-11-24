@@ -332,6 +332,33 @@ fn json_stdout_is_exactly_one_document() {
 }
 
 #[test]
+fn update_never_overwrites_a_login_matched_on_host_alone() {
+    // The export's row has no username; 1Password holds one login on the
+    // same host, for jane@example.com, which may be another account.
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export-empty-username.csv");
+    let out = t.run(&["sync", s(&export), "--update"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let log = t.log();
+    assert!(!log.contains("item edit"), "an edit was issued:\n{log}");
+    assert!(!log.contains("item get"), "the login was read:\n{log}");
+    assert!(templates(&log).is_empty(), "{log}");
+    assert!(stdout(&out).contains("0 updated"), "{}", stdout(&out));
+    assert!(
+        stderr(&out).contains("on host alone, which may be another account, so that login was not updated, even with --update"),
+        "{}",
+        stderr(&out)
+    );
+
+    let export = t.export("google-passwords-export-empty-username.csv");
+    let doc = one_json_document(&t.run(&["--json", "sync", s(&export), "--update"]));
+    assert_eq!(doc["summary"]["updated"], 0);
+    assert_eq!(doc["summary"]["unverified"]["host_only"], 1);
+    assert_eq!(doc["items"][0]["result"], "exists");
+    assert!(!t.log().contains("item edit"), "{}", t.log());
+}
+
+#[test]
 fn update_hands_op_a_0600_template_and_removes_it() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");

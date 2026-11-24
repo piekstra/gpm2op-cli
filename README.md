@@ -76,7 +76,10 @@ gpm2op self-update                             # update the binary in place
   existing ones. This is the fast, safe "catch-up."
 - **`--update`:** additionally reconcile — for a login that already exists, if
   the CSV password differs, update it (only then; identical passwords are left
-  untouched and reported as `unchanged`).
+  untouched and reported as `unchanged`). It updates only a login matched on
+  host **and** username: a row with no username that matches the only login on
+  its site by host alone may be another account's, so that login is left
+  untouched and the row is counted under `host_only`.
 - **`--dry-run`:** print the plan without writing anything. The export is kept.
 - **The export is deleted** after a sync in which no row failed, including one
   that created nothing because every row matched an existing login. The export
@@ -88,10 +91,12 @@ gpm2op self-update                             # update the binary in place
   last.
 - **Rows not checked against 1Password are counted.** A row that matched an
   existing login and was left as-is (default mode), a row with no username
-  matched to the only login on its site (which may be another account), and an
-  earlier duplicate of a later row's site and username are each counted, and
-  named on stderr in human mode. Before removing anything from Google Password
-  Manager, export again and run `--update` to reconcile them.
+  matched to the only login on its site by host alone (which may be another
+  account, so it is never updated, `--update` included), and an earlier
+  duplicate of a later row's site and username are each counted, and named on
+  stderr in human mode. Before removing anything from Google Password Manager,
+  export again and run `--update` to reconcile the first group, and check the
+  `host_only` logins in 1Password by hand.
 - **Output streams:** results are on stdout; progress (`Read N credential(s)
   …`) and notes are on stderr, in every mode.
 - **`--json`:** stdout carries exactly one JSON document. `sync` gives

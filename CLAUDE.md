@@ -56,7 +56,7 @@ in 1Password, and nothing may claim it does unless `sync::Unverified` is all
 zero. It counts, in disjoint groups, the rows not checked against 1Password:
 `not_compared` (matched host + username and skipped without reading the
 password), `host_only` (empty username matched to the only login on the host,
-which may be another account; skipped or updated) and `deduped` (dropped by
+which may be another account; always skipped, `--update` included) and `deduped` (dropped by
 `dedupe`). `--json` reports them as `summary.unverified`; human mode prints a
 stderr line per group (`report::print_unverified`), and
 `report::deleted_line` says 1Password holds every credential only when the
@@ -88,10 +88,13 @@ family error shape.
   sites) — so matching needs **no per-item reads**.
 - A credential matches when host + username match; same host + different
   username ⇒ a new login. Empty CSV username with exactly one login on the host
-  ⇒ match (avoids dupes).
+  ⇒ a host-only match (avoids dupes). That login may be another account's, so
+  `plan` always skips it, even under `--update`, and it counts under
+  `Unverified::host_only`.
 - Default `OnConflict::Skip` = create-missing only (no password reads at all).
-  `--update` = `OnConflict::Update`, which reads the existing password and
-  writes only if it differs (`unchanged` otherwise). Running twice ⇒ no changes.
+  `--update` = `OnConflict::Update`, which reads the existing password of an
+  exact (host + username) match and writes only if it differs (`unchanged`
+  otherwise). Running twice ⇒ no changes.
 
 ## Scope
 

@@ -64,7 +64,8 @@ pub struct Unverified {
     /// without reading its password (default mode).
     pub not_compared: usize,
     /// Had no username and matched the only login on their host, which may
-    /// be another account. Counted whether that login was skipped or updated.
+    /// be another account. That login is always left untouched, `--update`
+    /// included.
     pub host_only: usize,
     /// Repeated an earlier row's host and username; only the last was synced.
     pub deduped: usize,
@@ -155,7 +156,10 @@ fn plan(creds: &[Credential], index: &Index, on_conflict: OnConflict) -> Vec<Ste
             let matched = found.as_ref().map(|(_, m)| *m);
             let action = match found {
                 None => Action::Create,
-                Some((id, _)) => match on_conflict {
+                // A host-only match may be another account's login, so even
+                // --update must not overwrite its password.
+                Some((id, Match::HostOnly)) => Action::SkipExisting { id },
+                Some((id, Match::Exact)) => match on_conflict {
                     OnConflict::Skip => Action::SkipExisting { id },
                     OnConflict::Update => Action::UpdatePassword { id },
                 },
@@ -377,6 +381,15 @@ mod tests {
                 ..Unverified::default()
             }
         );
+    }
+
+    #[test]
+    fn update_never_overwrites_a_login_matched_on_host_alone() {
+        let existing = vec![login("id1", "github.com", "jane")];
+        let index = Index::build(&existing);
+        let planned = plan(&[cred("github.com", "", "pw")], &index, OnConflict::Update);
+        assert_eq!(planned[0].action, Action::SkipExisting { id: "id1".into() });
+        assert_eq!(planned[0].matched, Some(Match::HostOnly));
     }
 
     #[test]

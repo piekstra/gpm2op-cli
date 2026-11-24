@@ -99,9 +99,10 @@ fn unverified_notes(u: &Unverified) -> Vec<String> {
     }
     if u.host_only > 0 {
         notes.push(format!(
-            "{} row(s) had no username and were matched to the only login on their site, which \
-             may be another account. Check those logins in 1Password; the rows' passwords are \
-             still in Google Password Manager.",
+            "{} row(s) had no username and matched the only login on their site on host alone, \
+             which may be another account, so that login was not updated, even with --update. \
+             Check those logins in 1Password; the rows' passwords are still in Google Password \
+             Manager.",
             u.host_only
         ));
     }

@@ -17,6 +17,11 @@
   their site, and earlier duplicates of a later row. Human mode names each
   group on stderr. The deletion line says 1Password holds every credential only
   when there are none.
+- **`--update` no longer overwrites a login matched on host alone.** A row with
+  no username used to update the only login on its site, which may be another
+  account's. That login is now left untouched (no reveal, no edit), the row
+  counts under `unverified.host_only`, and stderr says it was not updated
+  because the match was on host alone.
 - **The `Read N credential(s) from …` line is on stderr in every mode**, human
   mode included. It was on stdout, so a script that parsed it there no longer
   finds it.
