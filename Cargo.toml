@@ -4,7 +4,7 @@ description = "Idempotently upsert Google/Chrome Password Manager exports into 1
 version = "0.3.0"
 edition = "2021"
 rust-version = "1.82"
-license = "MIT"
+license = "AGPL-3.0-only"
 repository = "https://github.com/piekstra/gpm2op-cli"
 authors = ["piekstra"]
 
