@@ -1169,6 +1169,7 @@ fn a_pw2op_that_is_a_copy_of_the_alias_does_not_loop() {
     let mut child = t
         .command_of(&alias, &["--help"])
         .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
         .spawn()
         .unwrap();
     let start = Instant::now();
@@ -1182,6 +1183,11 @@ fn a_pw2op_that_is_a_copy_of_the_alias_does_not_loop() {
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success());
     assert!(stdout(&out).contains("Usage: gpm2op"), "{}", stdout(&out));
+    assert!(
+        stderr(&out).contains("this pw2op is a copy of the gpm2op alias"),
+        "{}",
+        stderr(&out)
+    );
 }
 
 #[test]

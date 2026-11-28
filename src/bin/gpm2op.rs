@@ -14,6 +14,8 @@ const ALIAS_ENV: &str = "PW2OP_INVOKED_AS";
 
 const MOVE_NOTE: &str =
     "note: gpm2op is now pw2op. Call pw2op instead: gpm2op is removed after v0.6.x.";
+const COPY_NOTE: &str = "note: this pw2op is a copy of the gpm2op alias. Run `pw2op self-update` \
+to replace it with the real pw2op from the latest release.";
 const INSTALL_NOTE: &str = "note: gpm2op is now pw2op. Install pw2op beside this command \
 (https://github.com/piekstra/pw2op-cli#renamed-from-gpm2op): gpm2op is removed after v0.6.x, \
 and an install with only gpm2op cannot update itself after that.";
@@ -39,8 +41,20 @@ fn main() -> ExitCode {
             return pw2op::main("gpm2op", "gpm2op");
         }
     }
+    // A copy of the alias saved as `pw2op`: its self-update installs the
+    // real `pw2op` into that file.
+    if own_name().as_deref() == Some("pw2op") {
+        eprintln!("{COPY_NOTE}");
+        return pw2op::main("gpm2op", "pw2op");
+    }
     eprintln!("{}", if handed_on { MOVE_NOTE } else { INSTALL_NOTE });
     pw2op::main("gpm2op", "gpm2op")
+}
+
+/// The running executable's file name.
+fn own_name() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.file_name()?.to_string_lossy().into_owned())
 }
 
 /// The executable `pw2op` in this binary's own directory, if there is one.
