@@ -58,7 +58,7 @@ impl Scratch {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_gpm2op"));
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pw2op"));
         cmd.args(args)
             .env(
                 "PATH",
@@ -119,7 +119,7 @@ fn leftover_temp_files(dir: &Path) -> Vec<PathBuf> {
             p.file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("gpm2op-")
+                .starts_with("pw2op-")
         })
         .collect()
 }
@@ -356,7 +356,7 @@ fn a_file_that_is_not_a_password_export_is_refused_before_op_runs() {
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
     assert!(export.exists());
     assert!(
-        stderr(&out).contains("not a password export gpm2op reads"),
+        stderr(&out).contains("not a password export pw2op reads"),
         "{}",
         stderr(&out)
     );
@@ -459,11 +459,11 @@ fn a_rejected_edit_timeout_warns_once_and_uses_the_default() {
     let export = t.export("google-passwords-export.csv");
     let out = t
         .command(&["sync", s(&export), "--update", "--force"])
-        .env("GPM2OP_EDIT_TIMEOUT", "2m")
+        .env("PW2OP_EDIT_TIMEOUT", "2m")
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let warning = "warning: GPM2OP_EDIT_TIMEOUT=\"2m\" is not a whole number of seconds above 0; using the default of 120 s.";
+    let warning = "warning: PW2OP_EDIT_TIMEOUT=\"2m\" is not a whole number of seconds above 0; using the default of 120 s.";
     assert_eq!(stderr(&out).matches(warning).count(), 1, "{}", stderr(&out));
 }
 
@@ -530,14 +530,14 @@ fn wait_within(child: &mut std::process::Child, limit: Duration) -> std::process
         if Instant::now() >= until {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("gpm2op still running after {limit:?}");
+            panic!("pw2op still running after {limit:?}");
         }
         std::thread::sleep(Duration::from_millis(20));
     }
 }
 
 #[test]
-fn a_sigterm_to_gpm2op_alone_reaches_op_and_removes_the_template() {
+fn a_sigterm_to_pw2op_alone_reaches_op_and_removes_the_template() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
     let mut child = t
@@ -547,7 +547,7 @@ fn a_sigterm_to_gpm2op_alone_reaches_op_and_removes_the_template() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    // A supervisor's `kill <pid>`: the signal reaches gpm2op only, while op
+    // A supervisor's `kill <pid>`: the signal reaches pw2op only, while op
     // waits on a prompt nobody answers.
     let until = Instant::now() + Duration::from_secs(10);
     while templates(&t.log()).is_empty() {
@@ -584,7 +584,7 @@ fn an_edit_that_never_finishes_is_stopped_and_fails_its_row() {
     let out = t
         .command(&["--json", "sync", s(&export), "--update", "--force"])
         .env("FAKE_OP_EDIT_SLEEP", "30")
-        .env("GPM2OP_EDIT_TIMEOUT", "1")
+        .env("PW2OP_EDIT_TIMEOUT", "1")
         .output()
         .unwrap();
     assert!(
@@ -761,7 +761,7 @@ fn keep_all_imports_every_distinct_password_across_exports_once() {
         s(&apple),
         "--keep-all",
         "--tag",
-        "gpm2op-import",
+        "pw2op-import",
         "--tag",
         "second",
     ]);
@@ -779,7 +779,7 @@ fn keep_all_imports_every_distinct_password_across_exports_once() {
     assert_eq!(summary["unverified"]["not_compared"], 0);
     assert_eq!(
         summary["tags"],
-        serde_json::json!(["gpm2op-import", "second"])
+        serde_json::json!(["pw2op-import", "second"])
     );
     assert_eq!(summary["csv_deleted"], true);
     assert!(!chrome.exists() && !apple.exists());
@@ -787,7 +787,7 @@ fn keep_all_imports_every_distinct_password_across_exports_once() {
     let log = t.log();
     assert_eq!(log.matches("item get").count(), 1, "{log}");
     assert_eq!(
-        log.matches("--tags gpm2op-import,second").count(),
+        log.matches("--tags pw2op-import,second").count(),
         3,
         "{log}"
     );
@@ -1034,4 +1034,55 @@ fn a_row_with_no_url_and_no_title_is_not_created_twice() {
     let doc = one_json_document(&out);
     assert_eq!(doc["summary"]["created"], 1, "{doc}");
     assert!(!t.log().contains("item edit"), "{}", t.log());
+}
+
+#[test]
+fn the_gpm2op_alias_runs_pw2op_under_its_old_name() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = Command::new(env!("CARGO_BIN_EXE_gpm2op"))
+        .args(["--json", "sync", s(&export), "--dry-run"])
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", repo("tests/support/bin").display()),
+        )
+        .env("FAKE_OP_DIR", repo("tests/fixtures/op"))
+        .env("TMPDIR", t.tmp())
+        .stdin(Stdio::null())
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(one_json_document(&out)["schema"], "sync-result/v1");
+    assert!(
+        stderr(&out).contains("gpm2op is now pw2op"),
+        "{}",
+        stderr(&out)
+    );
+
+    let help = Command::new(env!("CARGO_BIN_EXE_gpm2op"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(stdout(&help).contains("Usage: gpm2op"), "{}", stdout(&help));
+    let help = Command::new(env!("CARGO_BIN_EXE_pw2op"))
+        .arg("--help")
+        .output()
+        .unwrap();
+    assert!(stdout(&help).contains("Usage: pw2op"), "{}", stdout(&help));
+}
+
+#[test]
+fn the_pre_rename_edit_timeout_variable_still_counts() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t
+        .command(&["sync", s(&export), "--update", "--force"])
+        .env("GPM2OP_EDIT_TIMEOUT", "2m")
+        .output()
+        .unwrap();
+    assert!(
+        stderr(&out).contains("warning: GPM2OP_EDIT_TIMEOUT=\"2m\""),
+        "{}",
+        stderr(&out)
+    );
 }

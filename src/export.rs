@@ -122,7 +122,7 @@ pub fn kept_note(path: &str, kept: &Kept) -> Option<String> {
              a run with no failures deletes it."
         ),
         Kept::NotRegularFile(kind) => format!(
-            "Left {path} in place: it is {kind}, not a regular file, so gpm2op does not delete it. \
+            "Left {path} in place: it is {kind}, not a regular file, so pw2op does not delete it. \
              Delete the export it reads from yourself."
         ),
         Kept::Changed => format!(

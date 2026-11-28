@@ -41,15 +41,17 @@ jobs:
           for t in ${{ matrix.targets }}; do
             rustup target add "$t"
             cargo build --release --target "$t"
-            tar -C "target/$t/release" -czf "gpm2op-${{ github.ref_name }}-$t.tar.gz" gpm2op
-            shasum -a 256 "gpm2op-${{ github.ref_name }}-$t.tar.gz" > "gpm2op-${{ github.ref_name }}-$t.tar.gz.sha256"
+            # Both binaries: pw2op, and the gpm2op alias that a pre-rename
+            # install's self-update extracts by name.
+            tar -C "target/$t/release" -czf "pw2op-$GITHUB_REF_NAME-$t.tar.gz" pw2op gpm2op
+            shasum -a 256 "pw2op-$GITHUB_REF_NAME-$t.tar.gz" > "pw2op-$GITHUB_REF_NAME-$t.tar.gz.sha256"
           done
       - uses: actions/upload-artifact@v4
         with:
           name: dist-${{ runner.os }}
           path: |
-            gpm2op-${{ github.ref_name }}-*.tar.gz
-            gpm2op-${{ github.ref_name }}-*.tar.gz.sha256
+            pw2op-${{ github.ref_name }}-*.tar.gz
+            pw2op-${{ github.ref_name }}-*.tar.gz.sha256
           retention-days: 3
           if-no-files-found: error
 
@@ -74,15 +76,24 @@ jobs:
         with:
           draft: true
           files: |
-            dist/gpm2op-*.tar.gz
-            dist/gpm2op-*.tar.gz.sha256
+            dist/pw2op-*.tar.gz
+            dist/pw2op-*.tar.gz.sha256
       - name: Every expected asset was attached
         run: |
           set -euo pipefail
           missing=0
           for t in aarch64-apple-darwin x86_64-apple-darwin x86_64-unknown-linux-gnu; do
-            for f in "gpm2op-$GITHUB_REF_NAME-$t.tar.gz" "gpm2op-$GITHUB_REF_NAME-$t.tar.gz.sha256"; do
+            for f in "pw2op-$GITHUB_REF_NAME-$t.tar.gz" "pw2op-$GITHUB_REF_NAME-$t.tar.gz.sha256"; do
               [ -f "dist/$f" ] || { echo "::error::missing $f"; missing=1; }
+            done
+            # A pre-rename install's self-update takes the gpm2op file out of
+            # the archive; without it that install cannot update.
+            archive="dist/pw2op-$GITHUB_REF_NAME-$t.tar.gz"
+            [ -f "$archive" ] || continue
+            for bin in pw2op gpm2op; do
+              if ! tar -tzf "$archive" | grep -qx "$bin"; then
+                echo "::error::$archive has no $bin"; missing=1
+              fi
             done
           done
           exit "$missing"

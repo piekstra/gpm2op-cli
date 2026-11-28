@@ -115,7 +115,7 @@ pub fn read_csv(path: &Path) -> Result<Export> {
         .collect();
     let format = Format::detect(&columns).ok_or_else(|| {
         Error::Csv(format!(
-            "{}: not a password export gpm2op reads. Its first line ({} column(s)) is neither \
+            "{}: not a password export pw2op reads. Its first line ({} column(s)) is neither \
              Chrome / Google Password Manager's header (name,url,username,password,note; \
              url,username,password at least) nor Apple Passwords / Safari's \
              (Title,URL,Username,Password,Notes,OTPAuth), and not both name and title.",

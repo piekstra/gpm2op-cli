@@ -433,24 +433,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "gpm2op"
-version = "0.4.0"
-dependencies = [
- "clap",
- "clap_complete",
- "comfy-table",
- "csv",
- "libc",
- "pk-cli-core",
- "pk-cli-selfupdate",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "url",
-]
-
-[[package]]
 name = "heck"
 version = "0.5.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -873,6 +855,24 @@ checksum = "6f42ea446cab60335f76979ec15e12619a2165b5ae2c12166bef27d283a9fadf"
 dependencies = [
  "idna",
  "psl-types",
+]
+
+[[package]]
+name = "pw2op"
+version = "0.5.0"
+dependencies = [
+ "clap",
+ "clap_complete",
+ "comfy-table",
+ "csv",
+ "libc",
+ "pk-cli-core",
+ "pk-cli-selfupdate",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "url",
 ]
 
 [[package]]

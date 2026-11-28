@@ -1,6 +1,6 @@
 # Development
 
-Repo-local facts for working on `gpm2op`. Architecture rationale lives in
+Repo-local facts for working on `pw2op`. Architecture rationale lives in
 [`CLAUDE.md`](../CLAUDE.md); this file is the how-to-develop source of truth.
 
 ## Prerequisites
@@ -15,7 +15,9 @@ Repo-local facts for working on `gpm2op`. Architecture rationale lives in
 Single binary crate. Modules:
 
 ```
-src/main.rs        # clap dispatch, exit codes
+src/lib.rs         # clap dispatch, exit codes (pw2op::main)
+src/main.rs        # the pw2op binary
+src/bin/gpm2op.rs  # the pre-rename alias, kept through v0.6.x
 src/cli.rs         # command/flags
 src/source.rs      # CSV parsing: Chrome or Apple format by header, row numbers
 src/credential.rs  # normalized row + host normalization + op create template
@@ -58,7 +60,7 @@ make install   # cargo install --path .
   nothing unverified, and no one-time password or note left out.
 - **The `--update` temp file never outlives its edit**, short of SIGKILL: stop
   signals are held, forwarded to `op` and re-raised after the file is gone, and
-  `op` is killed after `GPM2OP_EDIT_TIMEOUT` seconds (default 120). See
+  `op` is killed after `PW2OP_EDIT_TIMEOUT` seconds (default 120). See
   `op::SignalHold` and `Op::run_held`.
 - **A file is read before `op` runs.** Format detection and argument checks
   fail with exit 2, and `--update` without `--force` outside a dry run with
@@ -97,7 +99,7 @@ The live write path needs an `op` session; verify manually with
 `op item edit <item>` also takes the template on piped stdin (op 2.42.0's
 `op item edit --help`: "You can also edit an item using piped input"). Piping
 it the way creates already do would remove the temp file, and with it
-`SignalHold`, `run_held` and `GPM2OP_EDIT_TIMEOUT`'s reason to exist. It needs
+`SignalHold`, `run_held` and `PW2OP_EDIT_TIMEOUT`'s reason to exist. It needs
 a live test against a scratch vault first, since the temp-file route is the
 one proven against real `op`: an item whose password changes, one whose
 password is unchanged, a failed edit, and that the resulting item matches the
@@ -109,9 +111,9 @@ on the item, by either route.
 Version lives in `Cargo.toml` (mirrored in `version.txt`). Tag to release:
 
 ```bash
-git tag -s -a v0.4.0 -m "gpm2op 0.4.0: …" && git push origin v0.4.0
+git tag -s -a v0.5.0 -m "pw2op 0.5.0: …" && git push origin v0.5.0
 ```
 
 Each version's user-facing changes go in `CHANGELOG.md` with the bump.
 
-`.github/workflows/release.yml` builds the binaries `gpm2op self-update` pulls.
+`.github/workflows/release.yml` builds the binaries `pw2op self-update` pulls.

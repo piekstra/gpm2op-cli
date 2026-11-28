@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Agent entrypoint for the **gpm2op** repository. This file is a thin index — the
+Agent entrypoint for the **pw2op** repository. This file is a thin index — the
 substance lives in the documents it points to. Keep it and `CLAUDE.md` short.
 
 ## Start here

@@ -1,11 +1,20 @@
-# gpm2op — internals
+# pw2op — internals
+
+Formerly gpm2op. The code is a library (`src/lib.rs`, `pw2op::main(bin)`)
+with two binaries: `pw2op` (`src/main.rs`) and the pre-rename alias `gpm2op`
+(`src/bin/gpm2op.rs`, a stderr note, then the same `main`). `bin` names the
+clap command, completions and the binary `self-update` replaces. Each release
+archive carries both, because a 0.4.0 install's updater asks the old repo
+(GitHub redirects), takes the asset whose name contains its target triple and
+extracts the file named `gpm2op`; `release.yml` fails a release whose archive
+lacks either. Keep the alias through v0.6.x.
 
 Upserts Google/Chrome Password Manager and Apple Passwords/Safari CSV exports
 into 1Password via the `op` CLI. Single binary crate. This file orients contributors/agents.
 
 ## Module map
 
-- `main.rs` — clap dispatch (`sync`, `check`), exit codes, and which stream
+- `lib.rs` — clap dispatch (`sync`, `check`), exit codes, and which stream
   each line goes to.
 - `cli.rs` — clap-derive command/flags.
 - `source.rs` — parse an export CSV. The header decides the `Format`:
@@ -44,13 +53,13 @@ into 1Password via the `op` CLI. Single binary crate. This file orients contribu
   blocks SIGINT/SIGTERM/SIGHUP/SIGQUIT while the file exists, and its drop
   delivers (or re-raises) a held one after the file is gone. `Op::run_held`
   supervises `op item edit`: it polls for a held signal and forwards it to
-  `op`, since a signal sent to gpm2op alone (`kill`, `timeout`, launchd) never
+  `op`, since a signal sent to pw2op alone (`kill`, `timeout`, launchd) never
   reaches `op`; `op` gets 5 s to exit before it is killed, and is killed after
-  `GPM2OP_EDIT_TIMEOUT` seconds (default 120) in any case, failing the row
+  `PW2OP_EDIT_TIMEOUT` seconds (default 120) in any case, failing the row
   (`parse_edit_timeout`; a rejected value warns once and uses the default).
   The child inherits the blocked mask on spawn (std does not reset it on
   macOS), so `SignalHold::release_in_child` restores the pre-hold mask in a
-  `pre_exec` hook. The mask is per thread: the hold assumes gpm2op is
+  `pre_exec` hook. The mask is per thread: the hold assumes pw2op is
   single-threaded apart from the pipe readers started under it. Only SIGKILL
   can leave the file.
 
@@ -171,11 +180,11 @@ are out — see README.
 
 ## Self-update & releases
 
-`src/selfupdate.rs` (`gpm2op self-update`) uses the `self_update` crate's GitHub
+`src/selfupdate.rs` (`pw2op self-update`) uses the `self_update` crate's GitHub
 backend to pull the platform binary from this repo's Releases and swap it in
 place. Assets are matched by Rust target triple, so the release workflow
 (`.github/workflows/release.yml`, triggered by a `v*` tag) names them
-`gpm2op-<tag>-<target>.tar.gz`. `version.txt` mirrors the Cargo version.
+`pw2op-<tag>-<target>.tar.gz`. `version.txt` mirrors the Cargo version.
 
 ## Testing
 
@@ -190,8 +199,8 @@ directory and the system's, so no test can reach the real `op` or raise a
 1Password prompt. They cover deleting and keeping the export, the unverified
 counts and their notes, one JSON document on stdout, the `--update` template's
 `0600` mode and removal (on success, a failed edit, SIGINT/SIGTERM mid-edit, a
-SIGTERM sent to gpm2op alone while `op` sleeps, and an edit past
-`GPM2OP_EDIT_TIMEOUT`), and that no password reaches argv.
+SIGTERM sent to pw2op alone while `op` sleeps, and an edit past
+`PW2OP_EDIT_TIMEOUT`), and that no password reaches argv.
 Export fixtures are synthetic CSVs in `tests/fixtures/`.
 
 The real `op` write path still needs a manual check against a scratch vault
