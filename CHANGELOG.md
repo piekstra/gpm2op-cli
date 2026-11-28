@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- README: Safari's export should have only Passwords selected, and its
+  unzipped folder is deleted with the `.zip`; a tag per run, and an undo that
+  archives (`op item delete --archive -`).
+
 ## v0.4.0 — 2026-11-28
 
 - **Apple Passwords / Safari exports.** `gpm2op sync` reads the
