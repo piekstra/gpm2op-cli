@@ -21,7 +21,7 @@ Planned: 12 change(s) across the export (nothing was written).
 $ pw2op sync ~/Downloads/GooglePasswords.csv
 Read 214 credential(s) from GooglePasswords.csv (Chrome / Google Password Manager). Target vault: "Private".
 Done: 12 created, 0 updated, 0 unchanged, 202 left as-is, 0 failed.
-202 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager. --update --dry-run lists the logins --update would compare; --update --force reconciles them (it overwrites a passkey on a login it edits, see the README's Passkeys section), or --keep-all keeps both passwords.
+202 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager. --update --dry-run -v lists the logins --update would compare; --update --force reconciles them (it overwrites a passkey on a login it edits, see the README's Passkeys section), or --keep-all keeps both passwords.
 Deleted the export at GooglePasswords.csv. Google Password Manager still holds every password in it, including what the notes above say did not reach 1Password.
 ```
 
@@ -149,12 +149,16 @@ pw2op self-update                             # update the binary in place
   login by replacing it from a JSON template, which overwrites a passkey
   stored on it, and `op`'s item JSON does not reliably show one. Pass
   `--force` once the logins it would change hold no passkey you need, or
-  before passkeys are moved into 1Password; `--dry-run --update` lists every matched login it would compare and might
+  before passkeys are moved into 1Password; `--dry-run --update -v` lists every matched login it would compare and might
   rewrite; it checks no passkeys, and reads passwords only to compare rows
   with neither a URL nor a title, which are never rewritten.
   `pw2op` still refuses to edit a login whose JSON does show a passkey, and
   that row fails.
 - **`--dry-run`:** print the plan without writing anything. The export is kept.
+- **`-v` / `--verbose`:** list each row's title, site and username: the
+  results table, or `title`, `host` and `username` on each `--json` item.
+  Without it, a run (a dry run included) prints the summary only, and rows
+  appear by number.
 - **Several exports in one run:** `sync` takes one or more CSVs, of either
   format. Their rows are matched together, so in the default mode the last row
   for a site and username wins across all of them; a password, one-time
@@ -225,8 +229,9 @@ pw2op self-update                             # update the binary in place
   export's `path`, `format`, `rows`, `unreadable_rows` and `deleted`), and
   `unverified` (`not_compared`, `host_only`, `title_only`, `deduped`,
   `unreadable`), then
-  `items`, each with its `file` (position among the exports, from 0) and `row`
-  (the header is row 1). The `--verbose` table shows the same row, as
+  `items`, each with its `file` (position among the exports, from 0), `row`
+  (the header is row 1) and `result`; `-v` adds `title`, `host` and
+  `username`. The `--verbose` table shows the same row, as
   `export:row` (export counted from 1) when the run has several exports.
   `pw2op --json check` gives `check-result/v1` (`vault`, `logins`).
 
@@ -323,8 +328,8 @@ the source is short enough to audit end to end:
 - **1Password stays the source of truth.** Every write is an `op` call; this
   tool stores nothing itself and keeps no state.
 - **It never prints your passwords** — not in tables, not in `--json`, not in
-  errors. Notes and errors name rows by number; only `--verbose` and `--json`
-  list each row's title, site and username.
+  errors. Notes and errors name rows by number; only `--verbose` (in the table,
+  or on `--json` items) lists each row's title, site and username.
 - **The tool deletes the CSV** once a non-dry-run sync finishes with no failed
   rows, because it holds every password in plain text and Google Password
   Manager or Apple Passwords keeps the originals. It removes only the

@@ -140,18 +140,23 @@ pub fn print_summary(summary: &Summary, dry_run: bool) {
     );
 }
 
-pub fn print_json(outcomes: &[Outcome], summary: &Summary, run: &RunReport) {
+/// The `sync-result/v1` document. Each item names its row by number only;
+/// `verbose` (`-v`) adds the row's `title`, `host` and `username`.
+pub fn print_json(outcomes: &[Outcome], summary: &Summary, run: &RunReport, verbose: bool) {
     let items: Vec<_> = outcomes
         .iter()
         .map(|o| {
-            serde_json::json!({
+            let mut item = serde_json::json!({
                 "file": o.origin.file,
                 "row": o.origin.row,
                 "result": label(&o.result),
-                "title": o.title,
-                "host": o.host,
-                "username": o.username,
-            })
+            });
+            if verbose {
+                item["title"] = o.title.clone().into();
+                item["host"] = o.host.clone().into();
+                item["username"] = o.username.clone().into();
+            }
+            item
         })
         .collect();
     let formats: BTreeSet<&str> = run.sources.iter().map(|s| s.format.id()).collect();
@@ -283,7 +288,7 @@ fn unverified_notes(u: &Unverified, keeper: &str, sources: &[Source]) -> Vec<Str
     if u.not_compared > 0 {
         notes.push(format!(
             "{} row(s) matched an existing login and were not compared. Their passwords are \
-             still in {keeper}. --update --dry-run lists the logins --update would compare; \
+             still in {keeper}. --update --dry-run -v lists the logins --update would compare; \
              --update --force reconciles them (it overwrites a passkey on a login it edits, see \
              the README's Passkeys section), or --keep-all keeps both passwords.",
             u.not_compared

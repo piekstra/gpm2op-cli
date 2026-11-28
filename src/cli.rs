@@ -100,11 +100,15 @@ pub struct SyncArgs {
     #[arg(long)]
     pub account: Option<String>,
 
-    /// Print the per-item results table (otherwise just the summary).
+    /// Show each row's title, site and username: the per-row results table,
+    /// or under --json the `title`, `host` and `username` of each item.
+    /// Without it, output is the summary, and rows appear by number only, in
+    /// dry runs too.
     #[arg(short, long)]
     pub verbose: bool,
 
-    /// Emit the summary (and results) as JSON.
+    /// Emit the summary and each row's result as JSON. Rows appear by file
+    /// and row number; -v adds their title, site and username.
     #[arg(long)]
     pub json: bool,
 }
