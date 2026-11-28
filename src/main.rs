@@ -1,6 +1,5 @@
-//! gpm2op — upsert a Google/Chrome Password Manager export into 1Password.
+//! gpm2op — upsert Google/Chrome and Apple Passwords/Safari exports into 1Password.
 
-mod chrome;
 mod cli;
 mod credential;
 mod error;
@@ -8,15 +7,17 @@ mod export;
 mod op;
 mod report;
 mod selfupdate;
+mod source;
 mod sync;
 
 use clap::Parser;
 use cli::{CheckArgs, Cli, Command, SyncArgs};
-use credential::Credential;
+use credential::{is_otpauth, Credential, Origin};
 use op::Op;
+use report::{RunReport, Source};
 use std::path::Path;
 use std::process::ExitCode;
-use sync::OnConflict;
+use sync::{Mode, OnConflict};
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -43,6 +44,7 @@ fn to_cli_error(err: &error::Error) -> pk_cli_core::CliError {
         E::OpMissing | E::Csv(_) => CliError::Usage(err.to_string()),
         E::Op(m) | E::Parse(m) => CliError::Upstream(m.clone()),
         E::Update(m) => CliError::Other(m.clone()),
+        E::Confirm(m) => CliError::ConfirmationRequired(m.clone()),
         _ => CliError::Other(err.to_string()),
     }
 }
@@ -97,69 +99,132 @@ fn check(args: CheckArgs, json: bool) -> error::Result<ExitCode> {
 }
 
 fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
-    let op = Op::new(args.account.clone());
-    // Fail early with a clear message if op isn't usable.
-    op.preflight()?;
-
-    let path = Path::new(&args.csv);
-    let read = export::Snapshot::of(path);
-    let export = chrome::read_csv(path)?;
-    let unreadable = export.unreadable;
-    let creds: Vec<Credential> = export.rows.into_iter().map(Credential::from).collect();
-    let total = creds.len();
-    let end = |failed| export::RunEnd {
-        dry_run: args.dry_run,
-        keep_csv: args.keep_csv,
-        credentials: total,
-        failed,
-    };
-
-    if creds.is_empty() {
-        let disposal = export::dispose(path, read.as_ref(), end(0));
-        let mut summary = sync::Summary::default();
-        summary.unverified.unreadable = unreadable;
-        if args.json {
-            report::print_json(&[], &summary, disposal.deleted());
-        } else {
-            println!("No usable credentials found in {}.", args.csv);
-            report::print_unverified(&summary.unverified);
+    // Every export is read, and its format decided, before `op` is touched,
+    // so a wrong file costs no 1Password prompt.
+    reject_repeated_paths(&args.csv)?;
+    if args.update && !args.dry_run && !args.force {
+        return Err(error::Error::Confirm(
+            "--update rewrites each changed login from a JSON template, and op overwrites a \
+             passkey stored on the login, which op's item JSON does not reliably show. Rerun with \
+             --force once those logins hold no passkey you need (or before passkeys are moved \
+             into 1Password). --update --dry-run lists every matched login --update would \
+             compare and might rewrite; it checks no passkeys, and reads passwords only to \
+             compare rows with neither a URL nor a title, which are never rewritten."
+                .into(),
+        ));
+    }
+    let mut sources = Vec::with_capacity(args.csv.len());
+    let mut snapshots = Vec::with_capacity(args.csv.len());
+    let mut creds: Vec<Credential> = Vec::new();
+    let mut otp_ignored = Vec::new();
+    for (file, csv) in args.csv.iter().enumerate() {
+        let path = Path::new(csv);
+        snapshots.push(export::Snapshot::of(path));
+        let export = source::read_csv(path)?;
+        for row in &export.rows {
+            if !row.otp.trim().is_empty() && !is_otpauth(&row.otp) {
+                otp_ignored.push(Origin { file, row: row.row });
+            }
         }
-        note_kept(&args.csv, &disposal);
-        return Ok(ExitCode::SUCCESS);
+        sources.push(Source {
+            path: csv.clone(),
+            format: export.format,
+            rows: export.rows.len(),
+            unreadable_rows: export.unreadable,
+            deleted: false,
+        });
+        creds.extend(
+            export
+                .rows
+                .into_iter()
+                .map(|row| Credential::from_row(file, row)),
+        );
     }
 
-    let on_conflict = if args.update {
-        OnConflict::Update
+    let mode = if args.keep_all {
+        Mode::KeepAll
+    } else if args.update {
+        Mode::Upsert(OnConflict::Update)
     } else {
-        OnConflict::Skip
+        Mode::Upsert(OnConflict::Skip)
     };
+    let total = creds.len();
+    let unreadable: usize = sources.iter().map(|s| s.unreadable_rows.len()).sum();
 
-    eprintln!(
-        "Read {total} credential(s) from {}. Target vault: \"{}\"{}.",
-        args.csv,
-        args.vault,
-        if args.dry_run { " (dry run)" } else { "" }
-    );
-
-    let (outcomes, mut summary) = sync::run(&op, &args.vault, creds, on_conflict, args.dry_run)?;
+    let (outcomes, mut summary) = if creds.is_empty() {
+        (Vec::new(), sync::Summary::default())
+    } else {
+        let op = Op::new(args.account.clone());
+        // Fail early with a clear message if op isn't usable.
+        op.preflight()?;
+        eprintln!(
+            "Read {total} credential(s) from {}. Target vault: \"{}\"{}{}.",
+            report::read_from(&sources),
+            args.vault,
+            if args.keep_all {
+                ", keeping every password"
+            } else {
+                ""
+            },
+            if args.dry_run { " (dry run)" } else { "" }
+        );
+        let opts = sync::Options {
+            vault: &args.vault,
+            mode,
+            dry_run: args.dry_run,
+            tags: &args.tags,
+        };
+        sync::run(&op, &opts, creds)?
+    };
     summary.unverified.unreadable = unreadable;
-    let disposal = export::dispose(path, read.as_ref(), end(summary.failed));
+    summary.otp.ignored = otp_ignored;
 
+    // A failed row anywhere keeps every export: the rows of one run are
+    // matched and de-duplicated together, so a rerun needs them all.
+    let mut kept = Vec::new();
+    for (source, read) in sources.iter_mut().zip(&snapshots) {
+        let end = export::RunEnd {
+            dry_run: args.dry_run,
+            keep_csv: args.keep_csv,
+            credentials: source.rows,
+            failed: summary.failed,
+        };
+        match export::dispose(Path::new(&source.path), read.as_ref(), end) {
+            export::Disposal::Deleted => source.deleted = true,
+            export::Disposal::Kept(why) => kept.push((source.path.clone(), why)),
+        }
+    }
+
+    let run = RunReport {
+        sources: &sources,
+        mode,
+        tags: &args.tags,
+    };
     if args.json {
-        report::print_json(&outcomes, &summary, disposal.deleted());
+        report::print_json(&outcomes, &summary, &run);
+    } else if total == 0 {
+        println!(
+            "No usable credentials found in {}.",
+            report::paths(&sources)
+        );
+        report::print_notes(&summary, &run);
     } else {
         if args.verbose || args.dry_run {
-            report::print_table(&outcomes);
+            report::print_table(&outcomes, sources.len() > 1);
         }
         report::print_summary(&summary, args.dry_run);
         if !args.dry_run {
-            report::print_unverified(&summary.unverified);
+            report::print_notes(&summary, &run);
         }
-        if disposal.deleted() {
-            println!("{}", report::deleted_line(&args.csv, &summary.unverified));
+        for source in sources.iter().filter(|s| s.deleted) {
+            println!("{}", report::deleted_line(source, &summary));
         }
     }
-    note_kept(&args.csv, &disposal);
+    for (path, why) in &kept {
+        if let Some(note) = export::kept_note(path, why) {
+            eprintln!("{note}");
+        }
+    }
 
     Ok(if summary.failed > 0 {
         ExitCode::FAILURE
@@ -168,11 +233,18 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
     })
 }
 
-/// Say on stderr why the export is still on disk, in every output mode.
-fn note_kept(csv: &str, disposal: &export::Disposal) {
-    if let export::Disposal::Kept(kept) = disposal {
-        if let Some(note) = export::kept_note(csv, kept) {
-            eprintln!("{note}");
+/// Refuse an export named twice: its rows would count as repeats of
+/// themselves, and the second disposal would find the first one's work.
+fn reject_repeated_paths(paths: &[String]) -> error::Result<()> {
+    let mut seen = std::collections::HashSet::new();
+    for (i, raw) in paths.iter().enumerate() {
+        let key = std::fs::canonicalize(raw).unwrap_or_else(|_| raw.into());
+        if !seen.insert(key) {
+            return Err(error::Error::Csv(format!(
+                "{raw} is named more than once (argument {}); name each export once",
+                i + 1
+            )));
         }
     }
+    Ok(())
 }

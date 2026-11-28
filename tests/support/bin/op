@@ -5,12 +5,17 @@
 #
 #   FAKE_OP_DIR        directory of op's JSON answers (tests/fixtures/op)
 #   FAKE_OP_ITEM_LIST  which `op item list` answer to give (default item-list.json)
+#   FAKE_OP_ITEM_GET   which `op item get` answer to give (default
+#                      item-get-revealed.json)
+#   FAKE_OP_ITEM_GET_FAIL  when set, `op item get` fails
 #   FAKE_OP_LOG        file each call's argv is appended to, one line per call
 #   FAKE_OP_EDIT_FAIL  when set, `op item edit` fails after recording its template
 #   FAKE_OP_EDIT_SIGNAL  when set (INT, TERM, ...), `op item edit` sends that
 #                      signal to gpm2op and fails, as a Ctrl-C mid-edit would
 #   FAKE_OP_EDIT_SLEEP when set, `op item edit` becomes `sleep` for that many
 #                      seconds, as op waiting on a prompt nobody answers would
+#   FAKE_OP_CREATED    file each `op item create` template (stdin) is appended
+#                      to, one line per item
 #
 # `op item create` fails for a template that names fail.example, so an export
 # row on that host stands for a row 1Password refuses.
@@ -33,6 +38,7 @@ case "${1:-} ${2:-}" in
 	;;
 "item create")
 	template=$(cat)
+	printf '%s\n' "$template" >>"${FAKE_OP_CREATED:-/dev/null}"
 	case "$template" in
 	*fail.example*)
 		echo "[ERROR] 2026/01/01 00:00:00 the test refuses this item" >&2
@@ -42,7 +48,11 @@ case "${1:-} ${2:-}" in
 	cat "$FAKE_OP_DIR/item-create.json"
 	;;
 "item get")
-	cat "$FAKE_OP_DIR/item-get-revealed.json"
+	if [ -n "${FAKE_OP_ITEM_GET_FAIL:-}" ]; then
+		echo "[ERROR] 2026/01/01 00:00:00 the test refuses this read" >&2
+		exit 1
+	fi
+	cat "$FAKE_OP_DIR/${FAKE_OP_ITEM_GET:-item-get-revealed.json}"
 	;;
 "item edit")
 	# op item edit <id> --template <path>

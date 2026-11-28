@@ -18,6 +18,9 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpItem {
     pub id: String,
+    /// Matched on for a login with no URL.
+    #[serde(default)]
+    pub title: String,
     /// For logins this is typically the username (from `op item list`).
     #[serde(default)]
     pub additional_information: Option<String>,
@@ -200,20 +203,28 @@ impl Op {
         serde_json::from_str(&out).map_err(|e| Error::Parse(format!("op item get: {e}")))
     }
 
-    /// Create a login item from a JSON template piped over stdin.
-    pub fn create_login(&self, vault: &str, template_json: &str) -> Result<String> {
-        let out = self.run(
-            &[
-                "item".into(),
-                "create".into(),
-                "--vault".into(),
-                vault.into(),
-                "--format".into(),
-                "json".into(),
-                "-".into(),
-            ],
-            Some(template_json),
-        )?;
+    /// Create a login item from a JSON template piped over stdin, with
+    /// `tags` (never secret) on argv.
+    pub fn create_login(
+        &self,
+        vault: &str,
+        template_json: &str,
+        tags: &[String],
+    ) -> Result<String> {
+        let mut args: Vec<String> = vec![
+            "item".into(),
+            "create".into(),
+            "--vault".into(),
+            vault.into(),
+            "--format".into(),
+            "json".into(),
+        ];
+        if !tags.is_empty() {
+            args.push("--tags".into());
+            args.push(tags.join(","));
+        }
+        args.push("-".into());
+        let out = self.run(&args, Some(template_json))?;
         let created: OpItem =
             serde_json::from_str(&out).map_err(|e| Error::Parse(format!("op item create: {e}")))?;
         Ok(created.id)
