@@ -203,6 +203,7 @@ pub fn print_json(outcomes: &[Outcome], summary: &Summary, run: &RunReport) {
             "unverified": {
                 "not_compared": summary.unverified.not_compared,
                 "host_only": summary.unverified.host_only,
+                "title_only": summary.unverified.title_only,
                 "deduped": summary.unverified.deduped,
                 "unreadable": summary.unverified.unreadable,
             },
@@ -282,7 +283,9 @@ fn unverified_notes(u: &Unverified, keeper: &str, sources: &[Source]) -> Vec<Str
     if u.not_compared > 0 {
         notes.push(format!(
             "{} row(s) matched an existing login and were not compared. Their passwords are \
-             still in {keeper}; run with --update to reconcile, or --keep-all to keep both.",
+             still in {keeper}. --update --dry-run lists the logins --update would compare; \
+             --update --force reconciles them (it overwrites a passkey on a login it edits, see \
+             the README's Passkeys section), or --keep-all keeps both passwords.",
             u.not_compared
         ));
     }
@@ -292,6 +295,15 @@ fn unverified_notes(u: &Unverified, keeper: &str, sources: &[Source]) -> Vec<Str
              which may be another account, so that login was not updated, even with --update. \
              Check those logins in 1Password; the rows' passwords are still in {keeper}.",
             u.host_only
+        ));
+    }
+    if u.title_only > 0 {
+        notes.push(format!(
+            "{} row(s) had no URL and matched a login with no URL on title and username alone, \
+             which may be another device's or account's, so that login was not updated, even \
+             with --update. Check those logins in 1Password; the rows' passwords are still in \
+             {keeper}.",
+            u.title_only
         ));
     }
     if u.deduped > 0 {
@@ -392,6 +404,7 @@ mod tests {
             unverified: Unverified {
                 not_compared: 3,
                 host_only: 2,
+                title_only: 0,
                 deduped: 1,
                 unreadable: 4,
             },
@@ -400,7 +413,7 @@ mod tests {
         let notes = notes(&summary, &run(&chrome));
         assert_eq!(notes.len(), 4);
         assert!(notes[0].starts_with("3 row(s) matched an existing login and were not compared"));
-        assert!(notes[0].contains("run with --update to reconcile"));
+        assert!(notes[0].contains("--update --force reconciles them"));
         assert!(notes[0].contains("still in Google Password Manager"));
         assert!(notes[1].starts_with("2 row(s) had no username"));
         assert!(notes[2].starts_with("1 row(s) repeated a later row's"));
@@ -417,13 +430,13 @@ mod tests {
             ..Summary::default()
         };
         let apple = [source("a.csv", Format::Apple)];
-        assert!(notes(&summary, &run(&apple))[0].contains("still in Apple Passwords;"));
+        assert!(notes(&summary, &run(&apple))[0].contains("still in Apple Passwords."));
         let both = [
             source("b.csv", Format::Chrome),
             source("a.csv", Format::Apple),
         ];
         assert!(notes(&summary, &run(&both))[0]
-            .contains("still in Google Password Manager or Apple Passwords;"));
+            .contains("still in Google Password Manager or Apple Passwords."));
     }
 
     #[test]

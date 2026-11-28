@@ -107,7 +107,8 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
             "--update rewrites each changed login from a JSON template, and op overwrites a \
              passkey stored on the login, which op's item JSON does not reliably show. Rerun with \
              --force once those logins hold no passkey you need (or before passkeys are moved \
-             into 1Password); --dry-run shows what would be updated."
+             into 1Password). --update --dry-run lists every matched login --update would \
+             compare and might rewrite; it reads no passwords and checks no passkeys."
                 .into(),
         ));
     }

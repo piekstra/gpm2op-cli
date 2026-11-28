@@ -62,16 +62,18 @@ The CSV holds every password in plain text, so `sync` removes it once a
 non-dry-run finishes with `failed == 0`, also when nothing was created.
 Deletion rests on Google Password Manager or Apple Passwords staying the source: the export is a
 copy, so removing it loses nothing. `failed == 0` does not mean every row is
-in 1Password, and nothing may claim it does unless `sync::Unverified` is all
-zero. It counts, in disjoint groups, the rows not checked against 1Password:
+in 1Password, and nothing may claim it does unless `Summary::complete`:
+nothing unverified, and no one-time password or note left out.
+`sync::Unverified` counts, in disjoint groups, the rows not checked against 1Password:
 `not_compared` (matched host + username and skipped without reading the
 password), `host_only` (empty username matched to the only login on the host,
 which may be another account; always skipped, `--update` included),
-`deduped` (dropped by `dedupe`) and `unreadable` (no URL and no username, so
+`title_only` (no URL, matched a URL-less login on title + username; always
+skipped, `--update` included), `deduped` (dropped by `dedupe`) and `unreadable` (no URL and no username, so
 `source::read_csv` dropped them; `main` sets this count). `--json` reports them as `summary.unverified`; human mode prints a
-stderr line per group (`report::print_unverified`), and
-`report::deleted_line` says 1Password holds every credential only when the
-total is zero. `export::may_delete` decides from the run's end,
+stderr line per group (`report::print_notes`), and
+`report::deleted_line` says 1Password holds every credential only when
+`Summary::complete`. `export::may_delete` decides from the run's end,
 `export::dispose` from the file:
 
 - Kept: `--dry-run`, `--keep-csv`, any failed row (so a rerun can retry; the
@@ -134,11 +136,17 @@ Apple's Credential Exchange on iPhone/iPad (README, Passkeys).
 
 ## Matching & idempotency
 
-- Index existing **Login** items by normalized **host** → list of
+- Index existing **Login** items by **site key** (the normalized host, or
+  `title:<lowercased title>` for a login with no URL) → list of
   `(username_lowercased, id)`, each pair once, sourced from `op item list` (its
   `additional_information` field carries the username, and `urls[].href` the
   sites) — so matching needs **no per-item reads**.
-- A credential matches when host + username match; same host + different
+- A credential matches when site key + username match. A match on a title key
+  is `Match::Title`: like host-only, `plan` always skips it, even under
+  `--update` (titles are labels, not sites), and it counts under
+  `Unverified::title_only`. A row with no URL and no title from the export
+  gets the key `row:<file>:<row>`, so the made-up "Untitled Login" title never
+  matches. Same host + different
   username ⇒ a new login. Empty CSV username with exactly one login on the host
   ⇒ a host-only match (avoids dupes). That login may be another account's, so
   `plan` always skips it, even under `--update`, and it counts under

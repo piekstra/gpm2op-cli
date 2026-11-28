@@ -167,7 +167,7 @@ fn rows_not_checked_against_1password_are_counted_and_named() {
     assert!(!export.exists(), "the export is still on disk");
     let err = stderr(&out);
     assert!(
-        err.contains("1 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager; run with --update to reconcile, or --keep-all to keep both."),
+        err.contains("1 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager. --update --dry-run lists the logins --update would compare; --update --force reconciles them"),
         "{err}"
     );
     assert!(err.contains("1 row(s) had no username"), "{err}");
@@ -183,7 +183,7 @@ fn rows_not_checked_against_1password_are_counted_and_named() {
     let doc = one_json_document(&t.run(&["--json", "sync", s(&export)]));
     assert_eq!(
         doc["summary"]["unverified"],
-        serde_json::json!({"not_compared": 1, "host_only": 1, "deduped": 1, "unreadable": 0})
+        serde_json::json!({"not_compared": 1, "host_only": 1, "title_only": 0, "deduped": 1, "unreadable": 0})
     );
     assert_eq!(doc["summary"]["created"], 1);
     assert_eq!(doc["summary"]["csv_deleted"], true);

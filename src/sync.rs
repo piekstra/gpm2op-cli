@@ -130,7 +130,7 @@ pub struct OtpCounts {
     pub ignored: Vec<Origin>,
 }
 
-/// Rows whose password this run did not check against 1Password, in four
+/// Rows whose password this run did not check against 1Password, in five
 /// disjoint groups. Their passwords may exist only in the password manager
 /// the export came from. A dry run counts the rows it would leave unverified.
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
@@ -143,6 +143,10 @@ pub struct Unverified {
     /// be another account. That login is always left untouched, `--update`
     /// included.
     pub host_only: usize,
+    /// Had no URL and matched a login with no URL on title and username,
+    /// which may be another device's or account's. That login is always left
+    /// untouched, `--update` included.
+    pub title_only: usize,
     /// Repeated a later row's host and username; only the last was synced.
     pub deduped: usize,
     /// Had neither a URL nor a username, so `source::read_csv` dropped them
@@ -152,7 +156,7 @@ pub struct Unverified {
 
 impl Unverified {
     pub fn total(&self) -> usize {
-        self.not_compared + self.host_only + self.deduped + self.unreadable
+        self.not_compared + self.host_only + self.title_only + self.deduped + self.unreadable
     }
 }
 
@@ -161,6 +165,9 @@ impl Unverified {
 enum Match {
     Exact,
     HostOnly,
+    /// Same title and username, both with no URL. Titles are labels, not
+    /// sites, so this is never enough to update a login.
+    Title,
 }
 
 /// Index of existing login items keyed by site key (normalized host, or the
@@ -191,11 +198,17 @@ impl Index {
 
     /// Find an existing item id matching this credential's site+username.
     fn find(&self, cred: &Credential) -> Option<(String, Match)> {
-        let candidates = self.by_host.get(&cred.site_key())?;
+        let key = cred.site_key();
+        let candidates = self.by_host.get(&key)?;
         let want = cred.username.to_lowercase();
+        let by_title = key.starts_with("title:");
         // Prefer an exact username match on the same host.
         if let Some((_, id)) = candidates.iter().find(|(u, _)| *u == want) {
-            return Some((id.clone(), Match::Exact));
+            let how = if by_title { Match::Title } else { Match::Exact };
+            return Some((id.clone(), how));
+        }
+        if by_title {
+            return None;
         }
         // If the CSV row has no username and exactly one login exists for the
         // host, treat that as the match (avoids a duplicate).
@@ -334,6 +347,8 @@ fn plan(creds: &[Credential], index: &Index, mode: Mode) -> Vec<Step> {
                         // A host-only match may be another account's login, so
                         // even --update must not overwrite its password.
                         Some((id, Match::HostOnly)) => Action::SkipExisting { id },
+                        // Neither may a match on title alone.
+                        Some((id, Match::Title)) => Action::SkipExisting { id },
                         // A row with no password has nothing to write; --update
                         // must not blank the stored one.
                         Some((id, Match::Exact)) if c.password.is_empty() => {
@@ -364,6 +379,7 @@ fn tally_unverified(unverified: &mut Unverified, step: &Step) {
     }
     match (step.matched, &step.action) {
         (Some(Match::HostOnly), _) => unverified.host_only += 1,
+        (Some(Match::Title), _) if !step.cred.password.is_empty() => unverified.title_only += 1,
         (_, Action::SkipExisting { .. }) if !step.cred.password.is_empty() => {
             unverified.not_compared += 1
         }
@@ -820,6 +836,25 @@ mod tests {
     }
 
     #[test]
+    fn a_title_match_is_never_updated() {
+        let mut item = login("id1", "unused", "admin");
+        item.urls.clear();
+        item.title = "Router".into();
+        let index = Index::build(&[item]);
+        let mut c = cred("unused", "admin", "pw");
+        c.url.clear();
+        c.title = "Router".into();
+        c.titled = true;
+        let planned = plan(&[c], &index, Mode::Upsert(OnConflict::Update));
+        assert_eq!(planned[0].action, Action::SkipExisting { id: "id1".into() });
+        assert_eq!(planned[0].matched, Some(Match::Title));
+        let mut unverified = Unverified::default();
+        tally_unverified(&mut unverified, &planned[0]);
+        assert_eq!(unverified.title_only, 1);
+        assert_eq!(unverified.not_compared, 0);
+    }
+
+    #[test]
     fn a_row_with_no_url_matches_a_vault_login_with_no_url_by_title() {
         let mut item = login("id1", "unused", "admin");
         item.urls.clear();
@@ -828,6 +863,7 @@ mod tests {
         let mut c = cred("unused", "admin", "pw");
         c.url.clear();
         c.title = "router".into();
+        c.titled = true;
         assert_eq!(index.exact(&c), vec!["id1".to_string()]);
         let mut other = c.clone();
         other.title = "NAS".into();

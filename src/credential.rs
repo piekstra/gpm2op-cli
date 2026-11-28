@@ -16,6 +16,8 @@ pub struct Origin {
 pub struct Credential {
     pub origin: Origin,
     pub title: String,
+    /// Whether the title came from the export rather than being made up.
+    pub titled: bool,
     pub url: String,
     pub username: String,
     /// Empty when the export had none, such as a Chrome row for a sign-in
@@ -38,7 +40,8 @@ impl Credential {
     /// Build a credential from a row of the export at position `file`.
     pub fn from_row(file: usize, r: CsvRow) -> Self {
         let url = r.url.trim().to_string();
-        let title = if !r.name.trim().is_empty() {
+        let titled = !r.name.trim().is_empty();
+        let title = if titled {
             r.name.trim().to_string()
         } else {
             host_of(&url).unwrap_or_else(|| "Untitled Login".to_string())
@@ -47,6 +50,7 @@ impl Credential {
         Credential {
             origin: Origin { file, row: r.row },
             title,
+            titled,
             url,
             username: r.username.trim().to_string(),
             password: r.password,
@@ -61,9 +65,14 @@ impl Credential {
     }
 
     /// The key a login is matched on: its normalized host, or, for a row with
-    /// no URL, its lowercased title (`site_key_for`).
+    /// no URL, its lowercased title (`site_key_for`). A row with neither a URL
+    /// nor a title from the export gets a key of its own, `row:<file>:<row>`,
+    /// so a made-up "Untitled Login" never matches anything.
     pub fn site_key(&self) -> String {
-        site_key_for(self.host(), &self.title)
+        match self.host() {
+            None if !self.titled => format!("row:{}:{}", self.origin.file, self.origin.row),
+            host => site_key_for(host, &self.title),
+        }
     }
 
     /// Stable identity for de-duplicating CSV rows: (site key, lowercased
@@ -235,9 +244,20 @@ mod tests {
         );
         let no_url = Credential {
             title: "Router".into(),
+            titled: true,
             username: "admin".into(),
             ..Credential::default()
         };
         assert_eq!(no_url.site_key(), "title:router");
+        let untitled = Credential::from_row(
+            1,
+            CsvRow {
+                row: 7,
+                username: "admin".into(),
+                ..CsvRow::default()
+            },
+        );
+        assert_eq!(untitled.title, "Untitled Login");
+        assert_eq!(untitled.site_key(), "row:1:7");
     }
 }

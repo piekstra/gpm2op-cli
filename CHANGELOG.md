@@ -42,7 +42,9 @@
   the earlier row, so a passwordless row no longer creates a login without
   one.
 - **A row with no URL** matches a login with no URL by title, so a rerun no
-  longer creates it again.
+  longer creates it again. A title match is never updated, `--update`
+  included, and counts under the new `summary.unverified.title_only`. A row
+  with neither a URL nor a title never matches.
 - **The deletion line claims everything is in 1Password only when it is**:
   also no one-time password or note left out (`summary.otp.not_added`,
   `summary.otp.ignored_rows`, `summary.notes_not_added`, each with a stderr

@@ -18,8 +18,8 @@ Planned: 12 change(s) across the export (nothing was written).
 $ gpm2op sync ~/Downloads/GooglePasswords.csv
 Read 214 credential(s) from GooglePasswords.csv (Chrome / Google Password Manager). Target vault: "Private".
 Done: 12 created, 0 updated, 0 unchanged, 202 left as-is, 0 failed.
-202 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager; run with --update to reconcile, or --keep-all to keep both.
-Deleted the export at GooglePasswords.csv. Google Password Manager still holds every password in it, including the rows above that were not checked against 1Password.
+202 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager. --update --dry-run lists the logins --update would compare; --update --force reconciles them (it overwrites a passkey on a login it edits, see the README's Passkeys section), or --keep-all keeps both passwords.
+Deleted the export at GooglePasswords.csv. Google Password Manager still holds every password in it, including what the notes above say did not reach 1Password.
 ```
 
 The `Read …` line and the notes are on stderr; the rest is stdout.
@@ -122,7 +122,8 @@ gpm2op self-update                             # update the binary in place
   login by replacing it from a JSON template, which overwrites a passkey
   stored on it, and `op`'s item JSON does not reliably show one. Pass
   `--force` once the logins it would change hold no passkey you need, or
-  before passkeys are moved into 1Password; `--dry-run --update` lists them.
+  before passkeys are moved into 1Password; `--dry-run --update` lists every matched login it would compare and might
+  rewrite; it reads no passwords and checks no passkeys.
   `gpm2op` still refuses to edit a login whose JSON does show a passkey, and
   that row fails.
 - **`--dry-run`:** print the plan without writing anything. The export is kept.
@@ -170,7 +171,8 @@ gpm2op self-update                             # update the binary in place
 - **Rows not checked against 1Password are counted.** A row that matched an
   existing login and was left as-is (default mode), a row with no username
   matched to the only login on its site by host alone (which may be another
-  account, so it is never updated, `--update` included), an earlier duplicate
+  account, so it is never updated, `--update` included), a row with no URL
+  matched to a URL-less login by title (also never updated), an earlier duplicate
   of a later row's site and username, and a row with no URL and no username
   (not synced at all, named by row number) are each counted, and named on
   stderr in human mode. Notes name rows by number, never by site, username or
@@ -189,7 +191,8 @@ gpm2op self-update                             # update the binary in place
   `conflicting_logins` (keep-all), `otp` (`added`, `not_added`,
   `ignored_rows`), `notes_not_added`, `csv_deleted` (every export deleted), `sources` (each
   export's `path`, `format`, `rows`, `unreadable_rows` and `deleted`), and
-  `unverified` (`not_compared`, `host_only`, `deduped`, `unreadable`), then
+  `unverified` (`not_compared`, `host_only`, `title_only`, `deduped`,
+  `unreadable`), then
   `items`, each with its `file` (position among the exports, from 0) and `row`
   (the header is row 1). The `--verbose` table shows the same row, as
   `export:row` (export counted from 1) when the run has several exports.
@@ -201,7 +204,10 @@ A CSV row is considered "already in 1Password" when an existing **Login** item
 in the target vault shares the same **host** (normalized: lowercased, `www.`
 stripped) and **username** (case-insensitive). Different usernames on the same
 site are treated as separate logins. A row with no URL matches a login with no
-URL by its title (case-insensitive) instead of the host. CSV rows are
+URL by its title (case-insensitive) instead of the host. A title is a label,
+not a site, so such a match is never updated, `--update` included: it is left
+as-is and counted under `title_only`. A row with neither a URL nor a title
+never matches anything. CSV rows are
 de-duplicated by (host, username), keeping the last occurrence. The upshot: **running twice makes
 no second-run changes.** `--keep-all` matches on host, username **and**
 password instead, so it too makes no changes the second time.
