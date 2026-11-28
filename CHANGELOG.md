@@ -4,9 +4,11 @@
 
 - **Fix: output names no site or user without `-v`.** A dry run printed the
   per-row table (title, site, username) without `-v`, against `--help`; it
-  now prints the summary only. `--json` items carry `file`, `row` and
-  `result`, and `-v` adds `title`, `host` and `username`, which they always
-  carried before. A script reading those fields passes `-v`.
+  now prints the summary only, and a line naming any failed rows by number.
+  `--json` is now `sync-result/v2`: items carry `file`, `row` and `result`,
+  and `-v` adds `title`, `host` and `username` and `op`'s message to a
+  failed row's `result` (`failed` alone otherwise), all of which v1 always
+  carried. A script reading those fields passes `-v`.
 
 - **Renamed to pw2op** ("passwords to 1Password"), since it reads Apple
   Passwords / Safari as well as Google exports. The repository is now

@@ -224,6 +224,11 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
             report::print_table(&outcomes, sources.len() > 1);
         }
         report::print_summary(&summary, args.dry_run);
+        if !args.verbose {
+            if let Some(line) = report::failed_line(&outcomes, &sources) {
+                eprintln!("{line}");
+            }
+        }
         if !args.dry_run {
             report::print_notes(&summary, &run);
         }

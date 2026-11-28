@@ -109,7 +109,7 @@ stderr line per group (`report::print_notes`), and
 
 stdout carries results only; progress ("Read N credential(s)…") and notes go to
 stderr. Under `--json` stdout is exactly one document (piekstra-cli/1):
-`sync-result/v1`, `check-result/v1`, `cli-info/v1`, `self-update/v1`, or the
+`sync-result/v2`, `check-result/v1`, `cli-info/v1`, `self-update/v1`, or the
 family error shape.
 
 ## Several exports, keep-all and tags

@@ -157,8 +157,8 @@ pw2op self-update                             # update the binary in place
 - **`--dry-run`:** print the plan without writing anything. The export is kept.
 - **`-v` / `--verbose`:** list each row's title, site and username: the
   results table, or `title`, `host` and `username` on each `--json` item.
-  Without it, a run (a dry run included) prints the summary only, and rows
-  appear by number.
+  Without it, a run (a dry run included) prints the summary only, plus a line
+  naming any failed rows by number; `-v` shows `op`'s message for each.
 - **Several exports in one run:** `sync` takes one or more CSVs, of either
   format. Their rows are matched together, so in the default mode the last row
   for a site and username wins across all of them; a password, one-time
@@ -222,7 +222,7 @@ pw2op self-update                             # update the binary in place
 - **Output streams:** results are on stdout; progress (`Read N credential(s)
   …`) and notes are on stderr, in every mode.
 - **`--json`:** stdout carries exactly one JSON document. `sync` gives
-  `sync-result/v1`: `summary` with `format` (`chrome`, `apple` or `mixed`),
+  `sync-result/v2`: `summary` with `format` (`chrome`, `apple` or `mixed`),
   `mode` (`upsert` or `keep-all`), `tags`, the counts, `repeats` and
   `conflicting_logins` (keep-all), `otp` (`added`, `not_added`,
   `ignored_rows`), `notes_not_added`, `csv_deleted` (every export deleted), `sources` (each
@@ -230,8 +230,9 @@ pw2op self-update                             # update the binary in place
   `unverified` (`not_compared`, `host_only`, `title_only`, `deduped`,
   `unreadable`), then
   `items`, each with its `file` (position among the exports, from 0), `row`
-  (the header is row 1) and `result`; `-v` adds `title`, `host` and
-  `username`. The `--verbose` table shows the same row, as
+  (the header is row 1) and `result` (`failed` for a failed row); `-v` adds
+  `title`, `host` and `username`, and `op`'s message to a failed row's
+  `result`, which can name the item. The `--verbose` table shows the same row, as
   `export:row` (export counted from 1) when the run has several exports.
   `pw2op --json check` gives `check-result/v1` (`vault`, `logins`).
 

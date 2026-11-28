@@ -100,8 +100,9 @@ pub struct SyncArgs {
     #[arg(long)]
     pub account: Option<String>,
 
-    /// Show each row's title, site and username: the per-row results table,
-    /// or under --json the `title`, `host` and `username` of each item.
+    /// Show each row's title, site and username, and op's message for a
+    /// failed row: the per-row results table, or under --json the `title`,
+    /// `host` and `username` of each item and the message in its `result`.
     /// Without it, output is the summary, and rows appear by number only, in
     /// dry runs too.
     #[arg(short, long)]
