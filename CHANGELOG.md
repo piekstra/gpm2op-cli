@@ -2,6 +2,14 @@
 
 ## v0.5.0 — 2026-11-28
 
+- **Fix: output names no site or user without `-v`.** A dry run printed the
+  per-row table (title, site, username) without `-v`, against `--help`; it
+  now prints the summary only, and a line naming any failed rows by number.
+  `--json` is now `sync-result/v2`: items carry `file`, `row` and `result`,
+  and `-v` adds `title`, `host` and `username` and `op`'s message to a
+  failed row's `result` (`failed` alone otherwise), all of which v1 always
+  carried. A script reading those fields passes `-v`.
+
 - **Renamed to pw2op** ("passwords to 1Password"), since it reads Apple
   Passwords / Safari as well as Google exports. The repository is now
   `piekstra/pw2op-cli` (GitHub redirects the old name), and the crate and

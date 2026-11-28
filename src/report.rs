@@ -89,6 +89,24 @@ fn rows_text(origins: &[Origin], sources: &[Source]) -> String {
         .join("; ")
 }
 
+/// Without `-v`, the failed rows by number, since nothing else in human
+/// output names them (a dry run prints only its plan).
+pub fn failed_line(outcomes: &[Outcome], sources: &[Source]) -> Option<String> {
+    let failed: Vec<Origin> = outcomes
+        .iter()
+        .filter(|o| matches!(o.result, OutcomeKind::Failed(_)))
+        .map(|o| o.origin)
+        .collect();
+    if failed.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{} row(s) failed: {}. -v shows op's message for each.",
+        failed.len(),
+        rows_text(&failed, sources)
+    ))
+}
+
 pub fn print_table(outcomes: &[Outcome], several_files: bool) {
     if outcomes.is_empty() {
         println!("(nothing to do)");
@@ -113,7 +131,7 @@ pub fn print_table(outcomes: &[Outcome], several_files: bool) {
         };
         table.add_row(vec![
             Cell::new(row),
-            Cell::new(label(&o.result)),
+            Cell::new(label(&o.result, true)),
             Cell::new(&o.title),
             Cell::new(&o.host),
             Cell::new(&o.username),
@@ -140,18 +158,24 @@ pub fn print_summary(summary: &Summary, dry_run: bool) {
     );
 }
 
-pub fn print_json(outcomes: &[Outcome], summary: &Summary, run: &RunReport) {
+/// The `sync-result/v2` document. Each item names its row by number only;
+/// `verbose` (`-v`) adds the row's `title`, `host` and `username`, and `op`'s
+/// message to a failed row's `result`. (v1 always carried both.)
+pub fn print_json(outcomes: &[Outcome], summary: &Summary, run: &RunReport, verbose: bool) {
     let items: Vec<_> = outcomes
         .iter()
         .map(|o| {
-            serde_json::json!({
+            let mut item = serde_json::json!({
                 "file": o.origin.file,
                 "row": o.origin.row,
-                "result": label(&o.result),
-                "title": o.title,
-                "host": o.host,
-                "username": o.username,
-            })
+                "result": label(&o.result, verbose),
+            });
+            if verbose {
+                item["title"] = o.title.clone().into();
+                item["host"] = o.host.clone().into();
+                item["username"] = o.username.clone().into();
+            }
+            item
         })
         .collect();
     let formats: BTreeSet<&str> = run.sources.iter().map(|s| s.format.id()).collect();
@@ -179,7 +203,7 @@ pub fn print_json(outcomes: &[Outcome], summary: &Summary, run: &RunReport) {
         .map(|o| serde_json::json!({"file": o.file, "row": o.row}))
         .collect();
     let doc = serde_json::json!({
-        "schema": "sync-result/v1",
+        "schema": "sync-result/v2",
         "summary": {
             "format": format,
             "mode": run.mode.id(),
@@ -283,7 +307,7 @@ fn unverified_notes(u: &Unverified, keeper: &str, sources: &[Source]) -> Vec<Str
     if u.not_compared > 0 {
         notes.push(format!(
             "{} row(s) matched an existing login and were not compared. Their passwords are \
-             still in {keeper}. --update --dry-run lists the logins --update would compare; \
+             still in {keeper}. --update --dry-run -v lists the logins --update would compare; \
              --update --force reconciles them (it overwrites a passkey on a login it edits, see \
              the README's Passkeys section), or --keep-all keeps both passwords.",
             u.not_compared
@@ -362,13 +386,16 @@ pub fn deleted_line(source: &Source, summary: &Summary) -> String {
     }
 }
 
-fn label(kind: &OutcomeKind) -> String {
+/// A row's result. `op`'s message for a failed row may name the item, so it
+/// is shown only with `-v` (`detail`).
+fn label(kind: &OutcomeKind, detail: bool) -> String {
     match kind {
         OutcomeKind::Created => "created".into(),
         OutcomeKind::Updated => "updated".into(),
         OutcomeKind::Unchanged => "unchanged".into(),
         OutcomeKind::SkippedExisting => "exists".into(),
-        OutcomeKind::Failed(e) => format!("failed: {e}"),
+        OutcomeKind::Failed(e) if detail => format!("failed: {e}"),
+        OutcomeKind::Failed(_) => "failed".into(),
         OutcomeKind::Planned(p) => format!("would {p}"),
     }
 }

@@ -118,7 +118,7 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
             "--update rewrites each changed login from a JSON template, and op overwrites a \
              passkey stored on the login, which op's item JSON does not reliably show. Rerun with \
              --force once those logins hold no passkey you need (or before passkeys are moved \
-             into 1Password). --update --dry-run lists every matched login --update would \
+             into 1Password). --update --dry-run -v lists every matched login --update would \
              compare and might rewrite; it checks no passkeys, and reads passwords only to \
              compare rows with neither a URL nor a title, which are never rewritten."
                 .into(),
@@ -212,7 +212,7 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
         tags: &args.tags,
     };
     if args.json {
-        report::print_json(&outcomes, &summary, &run);
+        report::print_json(&outcomes, &summary, &run, args.verbose);
     } else if total == 0 {
         println!(
             "No usable credentials found in {}.",
@@ -220,10 +220,15 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
         );
         report::print_notes(&summary, &run);
     } else {
-        if args.verbose || args.dry_run {
+        if args.verbose {
             report::print_table(&outcomes, sources.len() > 1);
         }
         report::print_summary(&summary, args.dry_run);
+        if !args.verbose {
+            if let Some(line) = report::failed_line(&outcomes, &sources) {
+                eprintln!("{line}");
+            }
+        }
         if !args.dry_run {
             report::print_notes(&summary, &run);
         }

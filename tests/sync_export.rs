@@ -173,7 +173,7 @@ fn rows_not_checked_against_1password_are_counted_and_named() {
     assert!(!export.exists(), "the export is still on disk");
     let err = stderr(&out);
     assert!(
-        err.contains("1 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager. --update --dry-run lists the logins --update would compare; --update --force reconciles them"),
+        err.contains("1 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager. --update --dry-run -v lists the logins --update would compare; --update --force reconciles them"),
         "{err}"
     );
     assert!(err.contains("1 row(s) had no username"), "{err}");
@@ -280,7 +280,7 @@ fn a_failed_row_keeps_the_export_for_the_rerun() {
 fn a_failed_row_reports_ops_message() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export-with-refused-row.csv");
-    let doc = one_json_document(&t.run(&["--json", "sync", s(&export)]));
+    let doc = one_json_document(&t.run(&["--json", "sync", s(&export), "-v"]));
     let refused = doc["items"]
         .as_array()
         .unwrap()
@@ -379,7 +379,7 @@ fn json_stdout_is_exactly_one_document() {
     let export = t.export("google-passwords-export.csv");
 
     let dry = one_json_document(&t.run(&["--json", "sync", s(&export), "--dry-run"]));
-    assert_eq!(dry["schema"], "sync-result/v1");
+    assert_eq!(dry["schema"], "sync-result/v2");
     assert_eq!(dry["summary"]["planned"], 3);
     assert_eq!(dry["summary"]["csv_deleted"], false);
     assert!(export.exists());
@@ -588,7 +588,7 @@ fn an_edit_that_never_finishes_is_stopped_and_fails_its_row() {
     let export = t.export("google-passwords-export.csv");
     let started = Instant::now();
     let out = t
-        .command(&["--json", "sync", s(&export), "--update", "--force"])
+        .command(&["--json", "sync", s(&export), "--update", "--force", "-v"])
         .env("FAKE_OP_EDIT_SLEEP", "30")
         .env("PW2OP_EDIT_TIMEOUT", "1")
         .output()
@@ -890,7 +890,7 @@ fn update_never_edits_a_login_that_holds_a_passkey() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
     let out = t
-        .command(&["--json", "sync", s(&export), "--update", "--force"])
+        .command(&["--json", "sync", s(&export), "--update", "--force", "-v"])
         .env("FAKE_OP_ITEM_GET", "item-get-revealed-passkey.json")
         .output()
         .unwrap();
@@ -917,7 +917,7 @@ fn update_needs_force_outside_a_dry_run() {
     let doc = one_json_document(&t.run(&["--json", "sync", s(&export), "--update"]));
     assert_eq!(doc["error"]["code"], "confirmation_required");
 
-    let out = t.run(&["sync", s(&export), "--update", "--dry-run"]);
+    let out = t.run(&["sync", s(&export), "--update", "--dry-run", "-v"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stdout(&out).contains("would update"), "{}", stdout(&out));
 }
@@ -1062,7 +1062,7 @@ fn the_gpm2op_alias_alone_runs_pw2op_under_its_old_name() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(one_json_document(&out)["schema"], "sync-result/v1");
+    assert_eq!(one_json_document(&out)["schema"], "sync-result/v2");
     assert!(
         stderr(&out).contains("gpm2op is now pw2op"),
         "{}",
@@ -1158,7 +1158,7 @@ fn the_alias_beside_the_real_pw2op_still_answers_as_gpm2op() {
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    assert_eq!(one_json_document(&out)["schema"], "sync-result/v1");
+    assert_eq!(one_json_document(&out)["schema"], "sync-result/v2");
     // The variable the alias set is not passed on to op.
     let log = fs::read_to_string(t.dir.path().join("op.log")).unwrap();
     assert!(log.contains("invoked-as unset"), "{log}");
@@ -1247,5 +1247,113 @@ fn the_pre_rename_edit_timeout_variable_still_counts() {
         stderr(&out).contains("warning: GPM2OP_EDIT_TIMEOUT=\"2m\""),
         "{}",
         stderr(&out)
+    );
+}
+
+/// Every title, site and username in the synthetic Google export.
+const EXPORT_NAMES: [&str; 7] = [
+    "Example",
+    "example.com",
+    "example.org",
+    "example.net",
+    "jane@example.com",
+    "jane",
+    "Example Org",
+];
+
+fn names_in(text: &str) -> Vec<&'static str> {
+    EXPORT_NAMES
+        .iter()
+        .copied()
+        .filter(|n| text.contains(n))
+        .collect()
+}
+
+#[test]
+fn a_dry_run_without_verbose_names_no_title_site_or_username() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t.run(&["sync", s(&export), "--dry-run"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    // The export's path names the file, not a row; leave it out.
+    let all = format!("{}{}", stdout(&out), stderr(&out)).replace(s(&export), "<export>");
+    assert_eq!(names_in(&all), Vec::<&str>::new(), "{all}");
+    assert!(stdout(&out).contains("Planned: 3 change(s)"), "{all}");
+
+    let out = t.run(&["sync", s(&export), "--dry-run", "-v"]);
+    assert!(
+        stdout(&out).contains("jane@example.com"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn json_without_verbose_gives_rows_by_number_only() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t.run(&["--json", "sync", s(&export), "--dry-run"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let doc = one_json_document(&out);
+    let items = doc["items"].as_array().unwrap();
+    assert_eq!(items.len(), 3);
+    for item in items {
+        let keys: Vec<&str> = item
+            .as_object()
+            .unwrap()
+            .keys()
+            .map(|k| k.as_str())
+            .collect();
+        assert_eq!(keys, ["file", "result", "row"], "{item}");
+    }
+    let all = format!("{}{}", stdout(&out), stderr(&out)).replace(s(&export), "<export>");
+    assert_eq!(names_in(&all), Vec::<&str>::new(), "{all}");
+
+    let doc = one_json_document(&t.run(&["--json", "sync", s(&export), "--dry-run", "-v"]));
+    assert_eq!(doc["items"][0]["username"], "jane@example.com");
+    assert!(doc["items"][0]["host"].is_string());
+    assert!(doc["items"][0]["title"].is_string());
+}
+
+#[test]
+fn a_keep_all_dry_run_without_verbose_names_its_failed_rows_by_number() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export-keep-all.csv");
+    let out = t
+        .command(&["sync", s(&export), "--keep-all", "--dry-run"])
+        .env("FAKE_OP_ITEM_GET_FAIL", "1")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let all = format!("{}{}", stdout(&out), stderr(&out)).replace(s(&export), "<export>");
+    assert!(all.contains("row(s) failed: row"), "{all}");
+    assert!(all.contains("-v shows op's message"), "{all}");
+    assert!(!all.contains("the test refuses this read"), "{all}");
+    assert_eq!(names_in(&all), Vec::<&str>::new(), "{all}");
+}
+
+#[test]
+fn a_failed_row_in_json_without_verbose_carries_no_op_message() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export-with-refused-row.csv");
+    let out = t.run(&["--json", "sync", s(&export)]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let doc = one_json_document(&out);
+    let results: Vec<&str> = doc["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i["result"].as_str().unwrap())
+        .collect();
+    assert!(results.contains(&"failed"), "{results:?}");
+    assert!(
+        results.iter().all(|r| !r.starts_with("failed:")),
+        "{results:?}"
+    );
+    let all = format!("{}{}", stdout(&out), stderr(&out)).replace(s(&export), "<export>");
+    assert_eq!(names_in(&all), Vec::<&str>::new(), "{all}");
+    assert!(
+        !all.contains("fail.example") && !all.contains("Refused"),
+        "{all}"
     );
 }

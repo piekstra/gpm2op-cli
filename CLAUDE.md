@@ -42,7 +42,9 @@ into 1Password via the `op` CLI. One crate: a library (`src/lib.rs`) with two th
   credential, execute, and tally a `Summary`.
 - `export.rs` — removes the export after a run with no failed rows, and the
   stderr note for an export left on disk.
-- `report.rs` — table / JSON / summary rendering. Notes name rows by number,
+- `report.rs` — table / JSON / summary rendering. The table, and each JSON
+  item's `title`, `host` and `username`, appear only with `-v`; otherwise
+  output names rows by number, dry runs included. Notes name rows by number,
   never by title, site, username or password, and name the password manager
   each export came from (`Format::keeper`).
 - `error.rs` — error type, incl. friendly `OpMissing` / `OpNotSignedIn`.
@@ -107,7 +109,7 @@ stderr line per group (`report::print_notes`), and
 
 stdout carries results only; progress ("Read N credential(s)…") and notes go to
 stderr. Under `--json` stdout is exactly one document (piekstra-cli/1):
-`sync-result/v1`, `check-result/v1`, `cli-info/v1`, `self-update/v1`, or the
+`sync-result/v2`, `check-result/v1`, `cli-info/v1`, `self-update/v1`, or the
 family error shape.
 
 ## Several exports, keep-all and tags
