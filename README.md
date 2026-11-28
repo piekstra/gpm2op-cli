@@ -67,9 +67,10 @@ The CSV's header is `name,url,username,password,note`. A file with only
 - **iPhone or iPad:** **Settings → Apps → Safari**, below *History and Website
   Data* tap **Export**, select **Passwords**, then **Save to Downloads**
   ([Apple](https://support.apple.com/guide/iphone/iphf28f2e93e/ios)).
-- **Safari on a Mac:** **File → Export Browsing Data to File** saves a `.zip`;
-  unzip it and pass the passwords CSV inside. Delete both the `.zip` and the
-  CSV afterwards.
+- **Safari on a Mac:** **File → Export Browsing Data to File**, with only
+  **Passwords** selected (the dialog can also export payment cards, history
+  and bookmarks), saves a `.zip`; unzip it and pass the passwords CSV inside.
+  Delete the `.zip` and the whole unzipped folder afterwards.
 
 The CSV's header is `Title,URL,Username,Password,Notes,OTPAuth`. Apple does not
 export Wi-Fi passwords, passwords in a group someone else shared with you, or
@@ -104,7 +105,7 @@ gpm2op sync passwords.csv                      # create missing logins
 gpm2op sync passwords.csv --update --force     # also fix changed passwords (see Passkeys)
 gpm2op sync passwords.csv --vault "Personal"   # choose a vault (default: Private)
 gpm2op sync passwords.csv --keep-csv           # leave the export on disk afterwards
-gpm2op sync Passwords.csv "Google Passwords.csv" --keep-all --tag import-2026-11
+gpm2op sync Passwords.csv "Google Passwords.csv" --keep-all --tag import-2026-11-28-1530
                                                # every distinct password, from both, tagged
 gpm2op sync passwords.csv --json               # machine-readable summary
 gpm2op self-update                             # update the binary in place
@@ -155,12 +156,16 @@ gpm2op self-update                             # update the binary in place
   found and undone:
 
   ```bash
-  op item list --vault Private --tags import-2026-11                      # what it created
-  op item list --vault Private --tags import-2026-11 --format json | op item delete -   # undo it
+  op item list --vault Private --tags import-2026-11-28-1530        # what it created
+  op item list --vault Private --tags import-2026-11-28-1530 --format json \
+    | op item delete --archive -                                    # undo it, into the Archive
   ```
 
-  `op item delete -` reads the item list on stdin, as 1Password's CLI
-  reference describes. Look at the list before deleting.
+  Give each run its own tag (date and time), or an undo removes every run
+  that shares it. `op item delete -` reads the item list on stdin, as
+  1Password's CLI reference describes, and `--archive` moves the items to
+  1Password's Archive so the undo can itself be undone. Look at the list
+  first: it also holds any tagged login kept or changed since.
 - **The export is deleted** after a sync in which no row failed, including one
   that created nothing because every row matched an existing login. The export
   is a copy: Google Password Manager or Apple Passwords still holds every
@@ -259,7 +264,8 @@ are not exported.
 
 1. **Delete every copy of the export.** `gpm2op sync` deletes the files it
    read after a clean run, and nothing else. Delete, then empty the trash
-   for, each copy that exists anywhere else: the `.zip` from Safari, a copy
+   for, each copy that exists anywhere else: the `.zip` from Safari and its
+   unzipped folder, a copy
    in Downloads, an attachment in an email or chat, and any copy uploaded to a
    shared drive such as Google Drive, iCloud Drive or Dropbox. On Drive,
    remove it from **Trash** as well, and check **Shared with me** of anyone
