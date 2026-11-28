@@ -55,12 +55,6 @@ pub enum Disposal {
     Kept(Kept),
 }
 
-impl Disposal {
-    pub fn deleted(&self) -> bool {
-        matches!(self, Disposal::Deleted)
-    }
-}
-
 /// Whether a run that ended this way may remove the export at all.
 pub fn may_delete(end: RunEnd) -> Result<(), Kept> {
     if end.dry_run {
@@ -210,7 +204,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = export_in(dir.path());
         let read = Snapshot::of(&path);
-        assert!(dispose(&path, read.as_ref(), clean()).deleted());
+        assert!(matches!(
+            dispose(&path, read.as_ref(), clean()),
+            Disposal::Deleted
+        ));
         assert!(!path.exists());
     }
 

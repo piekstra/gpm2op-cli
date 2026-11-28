@@ -4,12 +4,13 @@ use clap::{Args, Parser, Subcommand};
 use clap_complete::Shell;
 pub use pk_cli_selfupdate::SelfUpdateArgs;
 
-/// Catch your 1Password vault up to a Google/Chrome Password Manager export.
+/// Catch your 1Password vault up to a Google/Chrome or Apple Passwords/Safari export.
 ///
-/// `gpm2op` reads a Chrome/Google passwords CSV and idempotently upserts each
-/// login into 1Password via the `op` CLI: it creates the entries you don't have
-/// yet and, by default, leaves everything else untouched. Run it as often as you
-/// like — re-running only adds what's newly appeared.
+/// `gpm2op` reads a Chrome/Google or Apple Passwords/Safari passwords CSV and
+/// idempotently upserts each login into 1Password via the `op` CLI: it creates
+/// the entries you don't have yet and, by default, leaves everything else
+/// untouched. Run it as often as you like — re-running only adds what's newly
+/// appeared.
 #[derive(Debug, Parser)]
 #[command(name = "gpm2op", version, about, long_about = None)]
 pub struct Cli {
@@ -23,7 +24,7 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Upsert a Chrome/Google CSV export into 1Password.
+    /// Upsert Chrome/Google or Apple Passwords/Safari CSV exports into 1Password.
     Sync(SyncArgs),
     /// Verify `op` is installed and signed in, and show the target vault.
     Check(CheckArgs),
@@ -43,10 +44,12 @@ pub enum Command {
 
 #[derive(Debug, Args)]
 pub struct SyncArgs {
-    /// Path to the Chrome/Google Password Manager CSV export. It is deleted
-    /// after a sync with no failures (see --keep-csv).
-    #[arg(value_name = "CSV")]
-    pub csv: String,
+    /// One or more CSV exports: Chrome / Google Password Manager
+    /// (name,url,username,password,note) or Apple Passwords / Safari
+    /// (Title,URL,Username,Password,Notes,OTPAuth), told apart by the header.
+    /// Each is deleted after a sync with no failures (see --keep-csv).
+    #[arg(value_name = "CSV", required = true, num_args = 1..)]
+    pub csv: Vec<String>,
 
     /// 1Password vault to write into.
     #[arg(long, default_value = "Private")]
@@ -55,8 +58,22 @@ pub struct SyncArgs {
     /// Also update the stored password when an existing login's password
     /// differs from the CSV (default: leave existing logins untouched). Rows
     /// with no username that match a login on host alone are never updated.
-    #[arg(long)]
+    #[arg(long, conflicts_with = "keep_all")]
     pub update: bool,
+
+    /// Create a login for every distinct site, username and password, for
+    /// exports that disagree about which password is current. Exact repeats
+    /// across the files of the run are imported once, and a login already in
+    /// the vault with the same site, username and password is not created
+    /// again (its password is read to compare). Nothing existing is changed.
+    /// Without it, one login per site and username, the last row winning.
+    #[arg(long)]
+    pub keep_all: bool,
+
+    /// Tag every login this run creates (repeat for more than one), so the
+    /// import can be found, and undone, in 1Password.
+    #[arg(long = "tag", value_name = "TAG", value_parser = parse_tag)]
+    pub tags: Vec<String>,
 
     /// Show what would happen without writing anything. The export is kept.
     #[arg(long)]
@@ -90,4 +107,16 @@ pub struct CheckArgs {
     /// Operate on a specific 1Password account.
     #[arg(long)]
     pub account: Option<String>,
+}
+
+/// A tag `op item create --tags` takes as one tag: not blank, no comma.
+fn parse_tag(raw: &str) -> Result<String, String> {
+    let tag = raw.trim();
+    if tag.is_empty() {
+        return Err("a tag cannot be blank".into());
+    }
+    if tag.contains(',') {
+        return Err("a tag cannot contain a comma; repeat --tag for each tag".into());
+    }
+    Ok(tag.to_string())
 }

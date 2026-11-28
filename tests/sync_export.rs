@@ -30,9 +30,23 @@ impl Scratch {
     /// Copy a fixture export into the scratch directory under the name
     /// Google gives it.
     fn export(&self, fixture: &str) -> PathBuf {
-        let path = self.dir.path().join("Google Passwords.csv");
+        self.export_as(fixture, "Google Passwords.csv")
+    }
+
+    /// Copy a fixture export into the scratch directory as `name`.
+    fn export_as(&self, fixture: &str, name: &str) -> PathBuf {
+        let path = self.dir.path().join(name);
         fs::copy(repo("tests/fixtures").join(fixture), &path).unwrap();
         path
+    }
+
+    /// The templates the stand-in op was handed on `op item create`.
+    fn created(&self) -> Vec<Value> {
+        fs::read_to_string(self.dir.path().join("created.jsonl"))
+            .unwrap_or_default()
+            .lines()
+            .map(|l| serde_json::from_str(l).unwrap())
+            .collect()
     }
 
     fn tmp(&self) -> PathBuf {
@@ -52,6 +66,7 @@ impl Scratch {
             )
             .env("FAKE_OP_DIR", repo("tests/fixtures/op"))
             .env("FAKE_OP_LOG", self.dir.path().join("op.log"))
+            .env("FAKE_OP_CREATED", self.dir.path().join("created.jsonl"))
             .env("TMPDIR", self.tmp())
             .stdin(Stdio::null());
         cmd
@@ -152,7 +167,7 @@ fn rows_not_checked_against_1password_are_counted_and_named() {
     assert!(!export.exists(), "the export is still on disk");
     let err = stderr(&out);
     assert!(
-        err.contains("1 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager; run with --update to reconcile."),
+        err.contains("1 row(s) matched an existing login and were not compared. Their passwords are still in Google Password Manager; run with --update to reconcile, or --keep-all to keep both."),
         "{err}"
     );
     assert!(err.contains("1 row(s) had no username"), "{err}");
@@ -188,7 +203,7 @@ fn a_row_with_no_url_and_no_username_is_counted_as_unreadable() {
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stdout(&out).contains("Done: 1 created"), "{}", stdout(&out));
     assert!(
-        stderr(&out).contains("1 row(s) had no URL and no username, so they were not synced"),
+        stderr(&out).contains("1 row(s) had no URL and no username (row 3 of "),
         "{}",
         stderr(&out)
     );
@@ -321,7 +336,7 @@ fn an_export_read_from_stdin_is_not_deleted() {
 #[test]
 fn a_file_with_no_usable_rows_is_left_alone() {
     let t = Scratch::new();
-    let export = t.export("not-a-password-export.csv");
+    let export = t.export("google-passwords-export-no-usable-rows.csv");
     let out = t.run(&["sync", s(&export)]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(export.exists(), "a file that synced nothing was deleted");
@@ -330,6 +345,26 @@ fn a_file_with_no_usable_rows_is_left_alone() {
         "{}",
         stderr(&out)
     );
+    assert!(t.log().is_empty(), "op was called:\n{}", t.log());
+}
+
+#[test]
+fn a_file_that_is_not_a_password_export_is_refused_before_op_runs() {
+    let t = Scratch::new();
+    let export = t.export("not-a-password-export.csv");
+    let out = t.run(&["sync", s(&export)]);
+    assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
+    assert!(export.exists());
+    assert!(
+        stderr(&out).contains("not a password export gpm2op reads"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!stderr(&out).contains("memo"), "the header was repeated");
+    assert!(t.log().is_empty(), "op was called:\n{}", t.log());
+
+    let doc = one_json_document(&t.run(&["--json", "sync", s(&export)]));
+    assert_eq!(doc["error"]["code"], "usage");
 }
 
 #[test]
@@ -357,7 +392,7 @@ fn json_stdout_is_exactly_one_document() {
     assert_eq!(failed["summary"]["failed"], 1);
     assert_eq!(failed["summary"]["csv_deleted"], false);
 
-    let export = t.export("not-a-password-export.csv");
+    let export = t.export("google-passwords-export-no-usable-rows.csv");
     let empty = one_json_document(&t.run(&["--json", "sync", s(&export)]));
     assert_eq!(empty["summary"]["csv_deleted"], false);
     assert_eq!(empty["items"], serde_json::json!([]));
@@ -595,4 +630,264 @@ fn no_password_reaches_op_argv() {
     ] {
         assert!(!log.contains(pw), "{pw} was on op's argv:\n{log}");
     }
+}
+
+#[test]
+fn an_apple_passwords_export_is_detected_and_mapped() {
+    let t = Scratch::new();
+    let export = t.export_as("apple-passwords-export.csv", "Passwords.csv");
+    let out = t.run(&["--json", "sync", s(&export)]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let doc = one_json_document(&out);
+    let summary = &doc["summary"];
+    assert_eq!(summary["format"], "apple");
+    assert_eq!(summary["sources"][0]["format"], "apple");
+    assert_eq!(summary["mode"], "upsert");
+    // example.com matches the vault's login; the other three are created,
+    // the one with no password included.
+    assert_eq!(summary["created"], 3);
+    assert_eq!(summary["skipped_existing"], 1);
+    assert_eq!(summary["otp"]["added"], 1);
+    assert_eq!(
+        summary["otp"]["ignored_rows"],
+        serde_json::json!([{"file": 0, "row": 5}])
+    );
+    assert_eq!(summary["csv_deleted"], true);
+    assert!(!export.exists());
+    assert!(
+        stderr(&out).contains("(Apple Passwords / Safari)"),
+        "{}",
+        stderr(&out)
+    );
+    let created = t.created();
+    assert_eq!(created.len(), 3);
+    let org = &created[0];
+    assert_eq!(org["title"], "example.org (jane)");
+    let field = |item: &Value, ty: &str| {
+        item["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|f| f["type"] == ty)
+            .cloned()
+    };
+    assert_eq!(
+        field(org, "OTP").unwrap()["value"],
+        "otpauth://totp/Example:jane?secret=FIXTUREFIXTURE&issuer=Example"
+    );
+    let notes = org["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["purpose"] == "NOTES")
+        .unwrap();
+    assert_eq!(notes["value"], "an apple note");
+    let net = &created[1];
+    assert_eq!(net["title"], "example.net (jane)");
+    assert!(field(net, "CONCEALED").is_none(), "{net}");
+    assert!(field(&created[2], "OTP").is_none());
+    assert!(!t.log().contains("FIXTUREFIXTURE"), "{}", t.log());
+
+    let export = t.export_as("apple-passwords-export.csv", "Passwords.csv");
+    let out = t.run(&["sync", s(&export)]);
+    let err = stderr(&out);
+    assert!(
+        err.contains("not an otpauth:// address (row 5 of "),
+        "{err}"
+    );
+    assert!(err.contains("still in Apple Passwords"), "{err}");
+    assert!(
+        stdout(&out).contains("Apple Passwords still holds every password in it"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn the_human_summary_names_the_format() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t.run(&["sync", s(&export), "--dry-run"]);
+    assert!(
+        stderr(&out).contains("(Chrome / Google Password Manager)"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn a_row_with_no_password_is_created_and_never_blanks_a_stored_one() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export-empty-password.csv");
+    let out = t
+        .command(&["sync", s(&export)])
+        .env("FAKE_OP_ITEM_LIST", "item-list-empty.json")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("Done: 1 created"), "{}", stdout(&out));
+
+    // The same row against a vault that has the login: --update leaves it.
+    let export = t.export("google-passwords-export-empty-password.csv");
+    let out = t.run(&["sync", s(&export), "--update"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(!t.log().contains("item edit"), "{}", t.log());
+    assert!(!t.log().contains("item get"), "{}", t.log());
+    assert!(stdout(&out).contains("1 left as-is"), "{}", stdout(&out));
+    // Nothing to compare, so nothing is unverified.
+    assert!(
+        stdout(&out).contains("every credential read from it is in 1Password now"),
+        "{}",
+        stdout(&out)
+    );
+}
+
+#[test]
+fn keep_all_imports_every_distinct_password_across_exports_once() {
+    let t = Scratch::new();
+    let chrome = t.export("google-passwords-export-keep-all.csv");
+    let apple = t.export_as("apple-passwords-export-keep-all.csv", "Passwords.csv");
+    let out = t.run(&[
+        "--json",
+        "sync",
+        s(&chrome),
+        s(&apple),
+        "--keep-all",
+        "--tag",
+        "gpm2op-import",
+        "--tag",
+        "second",
+    ]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let doc = one_json_document(&out);
+    let summary = &doc["summary"];
+    assert_eq!(summary["format"], "mixed");
+    assert_eq!(summary["mode"], "keep-all");
+    // example.com's old password is the vault's own; the other three are new.
+    assert_eq!(summary["created"], 3, "{summary}");
+    assert_eq!(summary["unchanged"], 1);
+    assert_eq!(summary["repeats"], 2);
+    assert_eq!(summary["conflicting_logins"], 2);
+    assert_eq!(summary["unverified"]["deduped"], 0);
+    assert_eq!(summary["unverified"]["not_compared"], 0);
+    assert_eq!(
+        summary["tags"],
+        serde_json::json!(["gpm2op-import", "second"])
+    );
+    assert_eq!(summary["csv_deleted"], true);
+    assert!(!chrome.exists() && !apple.exists());
+
+    let log = t.log();
+    assert_eq!(log.matches("item get").count(), 1, "{log}");
+    assert_eq!(
+        log.matches("--tags gpm2op-import,second").count(),
+        3,
+        "{log}"
+    );
+    for pw in [
+        "fixture-password-1",
+        "fixture-password-2",
+        "fixture-password-8",
+    ] {
+        assert!(!log.contains(pw), "{pw} was on op's argv:\n{log}");
+    }
+
+    let created = t.created();
+    let passwords: Vec<&str> = created
+        .iter()
+        .map(|item| {
+            item["fields"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|f| f["purpose"] == "PASSWORD")
+                .unwrap()["value"]
+                .as_str()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        passwords,
+        vec![
+            "fixture-password-1",
+            "fixture-password-2",
+            "fixture-password-8"
+        ]
+    );
+    // The repeat's different note is kept with the row it repeated.
+    let note = created[0]["fields"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|f| f["purpose"] == "NOTES")
+        .unwrap();
+    assert_eq!(note["value"], "chrome note\n\napple note");
+}
+
+#[test]
+fn keep_all_names_conflicts_by_count_in_human_mode() {
+    let t = Scratch::new();
+    let chrome = t.export("google-passwords-export-keep-all.csv");
+    let apple = t.export_as("apple-passwords-export-keep-all.csv", "Passwords.csv");
+    let out = t.run(&["sync", s(&chrome), s(&apple), "--keep-all"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(err.contains("Read 6 credential(s) from 2 exports"), "{err}");
+    assert!(err.contains("keeping every password"), "{err}");
+    assert!(
+        err.contains("2 site and username pair(s) have more than one password"),
+        "{err}"
+    );
+    assert!(err.contains("2 row(s) repeated an earlier row's"), "{err}");
+    assert_eq!(stdout(&out).matches("Deleted the export at").count(), 2);
+}
+
+#[test]
+fn a_failed_row_keeps_every_export_of_the_run() {
+    let t = Scratch::new();
+    let refused = t.export("google-passwords-export-with-refused-row.csv");
+    let apple = t.export_as("apple-passwords-export.csv", "Passwords.csv");
+    let out = t.run(&["sync", s(&refused), s(&apple)]);
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    assert!(refused.exists() && apple.exists());
+}
+
+#[test]
+fn bad_arguments_are_refused_before_op_runs() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    for args in [
+        vec!["sync", s(&export), "--keep-all", "--update"],
+        vec!["sync", s(&export), "--tag", "a,b"],
+        vec!["sync", s(&export), "--tag", " "],
+        vec!["sync", s(&export), s(&export)],
+    ] {
+        let out = t.run(&args);
+        assert_eq!(out.status.code(), Some(2), "{args:?}: {}", stderr(&out));
+        assert!(export.exists(), "{args:?}");
+    }
+    assert!(t.log().is_empty(), "op was called:\n{}", t.log());
+}
+
+#[test]
+fn update_never_edits_a_login_that_holds_a_passkey() {
+    // op's help: a JSON template edit overwrites an item's passkey. The
+    // passkey field's shape in this fixture is an assumption; the guard
+    // matches any key or field type naming a passkey.
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t
+        .command(&["--json", "sync", s(&export), "--update"])
+        .env("FAKE_OP_ITEM_GET", "item-get-revealed-passkey.json")
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let doc = one_json_document(&out);
+    assert_eq!(doc["summary"]["failed"], 1);
+    assert!(doc["items"][0]["result"]
+        .as_str()
+        .unwrap()
+        .contains("holds a passkey"));
+    assert!(!t.log().contains("item edit"), "{}", t.log());
+    assert!(export.exists());
 }

@@ -1,5 +1,40 @@
 # Changelog
 
+## v0.4.0 — 2026-11-28
+
+- **Apple Passwords / Safari exports.** `gpm2op sync` reads the
+  `Title,URL,Username,Password,Notes,OTPAuth` CSV as well as Chrome's
+  `name,url,username,password,note`, told apart by the header. The `Read …`
+  line names the format, and `--json` gives `summary.format` (`chrome`,
+  `apple` or `mixed`). Title becomes the item title, Notes the notes, and an
+  `otpauth://` value a one-time password field (`summary.otp`); any other
+  OTPAuth value is not imported and stderr names its row.
+- **A file whose header is neither format is refused** with exit 2 before `op`
+  is called, and the error does not repeat the header. It used to sync
+  nothing and exit 0.
+- **Rows with no password** are imported without a password field, and
+  `--update` never uses one to blank a stored password.
+- **Several exports in one `sync`**, of either format, matched together. A
+  failed row keeps them all; a clean run deletes each. `summary.sources` lists
+  each export's path, format, rows, unreadable rows and whether it was deleted;
+  `csv_deleted` is true when all were. Each item gives its `file` and `row`.
+- **`--keep-all`** imports every distinct site, username and password as its
+  own login, for exports that disagree. Exact repeats across the run's files
+  are imported once (`summary.repeats`), a login already in the vault with the
+  same password is not created again, and nothing existing is changed.
+  `summary.conflicting_logins` counts the site and username pairs with more
+  than one password. Not combinable with `--update`. The default upsert is
+  unchanged.
+- **`--tag TAG`** (repeatable) tags every login a run creates, so an import can
+  be found and undone; the README has the `op` commands.
+- **`--update` never edits a login that holds a passkey**, since `op`'s JSON
+  template edit overwrites it; that row fails and says so.
+- Notes name unreadable rows by row number; the "still in …" wording names
+  the password manager each export came from.
+- README: Apple and Safari export steps, the passkey transfer from Apple
+  Passwords to 1Password on iPhone or iPad, and deleting every copy of the
+  export afterwards.
+
 ## v0.3.0 — 2026-11-23
 
 - **`gpm2op sync` deletes the CSV export by default** once a non-dry-run

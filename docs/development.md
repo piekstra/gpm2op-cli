@@ -17,7 +17,7 @@ Single binary crate. Modules:
 ```
 src/main.rs        # clap dispatch, exit codes
 src/cli.rs         # command/flags
-src/chrome.rs      # CSV parsing (header-indexed, tolerant)
+src/source.rs      # CSV parsing: Chrome or Apple format by header, row numbers
 src/credential.rs  # normalized row + host normalization + op create template
 src/op.rs          # op subprocess wrapper (secret-safe)
 src/sync.rs        # match / plan / execute / summary
@@ -57,6 +57,11 @@ make install   # cargo install --path .
   signals are held, forwarded to `op` and re-raised after the file is gone, and
   `op` is killed after `GPM2OP_EDIT_TIMEOUT` seconds (default 120). See
   `op::SignalHold` and `Op::run_held`.
+- **A file is read before `op` runs.** Format detection and argument checks
+  fail with exit 2 and no `op` call. An unrecognized header is never echoed.
+- **Rows are named by number.** Notes and errors give counts and row numbers,
+  never a title, site, username or password.
+- **`--update` never edits a login holding a passkey** (`sync::has_passkey`).
 - **One JSON document.** Under `--json`, stdout carries the DTO alone; progress
   and notes go to stderr.
 
@@ -68,9 +73,14 @@ template shape, matching/plan, dedupe, export removal.
 `tests/sync_export.rs` runs the binary against `tests/support/bin/op`, a shell
 stand-in that answers from `tests/fixtures/op/*.json` and logs argv. A test
 selects behavior with environment variables (`FAKE_OP_ITEM_LIST`,
-`FAKE_OP_EDIT_FAIL`, `FAKE_OP_EDIT_SIGNAL`, `FAKE_OP_EDIT_SLEEP`; see the
+`FAKE_OP_ITEM_GET`, `FAKE_OP_EDIT_FAIL`, `FAKE_OP_EDIT_SIGNAL`, `FAKE_OP_EDIT_SLEEP`; see the
 script's header); an export row on `fail.example` stands for a row `op`
-refuses. These tests are Unix-only.
+refuses. `FAKE_OP_CREATED` collects each create's stdin template so a test
+can check the item's fields. These tests are Unix-only.
+
+Export fixtures follow the documented column layouts only (Google's and
+Chrome's help, Apple's Passwords export) with invented sites and passwords.
+Never copy a row from a real export.
 
 The live write path needs an `op` session; verify manually with
 `op item create --dry-run -` against a scratch vault.
@@ -92,7 +102,7 @@ on the item, by either route.
 Version lives in `Cargo.toml` (mirrored in `version.txt`). Tag to release:
 
 ```bash
-git tag v0.3.0 && git push origin v0.3.0
+git tag -s -a v0.4.0 -m "gpm2op 0.4.0: …" && git push origin v0.4.0
 ```
 
 Each version's user-facing changes go in `CHANGELOG.md` with the bump.
