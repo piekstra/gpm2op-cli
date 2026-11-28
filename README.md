@@ -123,7 +123,8 @@ gpm2op self-update                             # update the binary in place
   stored on it, and `op`'s item JSON does not reliably show one. Pass
   `--force` once the logins it would change hold no passkey you need, or
   before passkeys are moved into 1Password; `--dry-run --update` lists every matched login it would compare and might
-  rewrite; it reads no passwords and checks no passkeys.
+  rewrite; it checks no passkeys, and reads passwords only to compare rows
+  with neither a URL nor a title, which are never rewritten.
   `gpm2op` still refuses to edit a login whose JSON does show a passkey, and
   that row fails.
 - **`--dry-run`:** print the plan without writing anything. The export is kept.

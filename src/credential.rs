@@ -67,15 +67,16 @@ impl Credential {
         host_of(&self.url)
     }
 
-    /// The key a login is matched on: its normalized host, or, for a row with
-    /// no URL, its lowercased title (`site_key_for`). A row with neither a URL
-    /// nor a title from the export gets a key of its own, `row:<file>:<row>`,
-    /// so a made-up "Untitled Login" never matches anything.
     /// A row with neither a URL nor a title from the export.
     pub fn is_untitled(&self) -> bool {
         self.host().is_none() && !self.titled
     }
 
+    /// The key a login is matched on: its normalized host, or, for a row with
+    /// no URL, its lowercased title (`site_key_for`). A row with neither a URL
+    /// nor a title from the export gets a key of its own, `row:<file>:<row>`,
+    /// so it never matches as a site; `Index::exact` instead compares it by
+    /// password with URL-less "Untitled Login" items.
     pub fn site_key(&self) -> String {
         match self.host() {
             None if !self.titled => format!("row:{}:{}", self.origin.file, self.origin.row),

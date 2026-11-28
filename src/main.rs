@@ -108,7 +108,8 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
              passkey stored on the login, which op's item JSON does not reliably show. Rerun with \
              --force once those logins hold no passkey you need (or before passkeys are moved \
              into 1Password). --update --dry-run lists every matched login --update would \
-             compare and might rewrite; it reads no passwords and checks no passkeys."
+             compare and might rewrite; it checks no passkeys, and reads passwords only to \
+             compare rows with neither a URL nor a title, which are never rewritten."
                 .into(),
         ));
     }

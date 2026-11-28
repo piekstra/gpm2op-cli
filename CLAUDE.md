@@ -140,7 +140,8 @@ Apple's Credential Exchange on iPhone/iPad (README, Passkeys).
   `title:<lowercased title>` for a login with no URL) → list of
   `(username_lowercased, id)`, each pair once, sourced from `op item list` (its
   `additional_information` field carries the username, and `urls[].href` the
-  sites) — so matching needs **no per-item reads**.
+  sites) — so matching needs **no per-item reads**, except keep-all's
+  comparisons and a row with neither a URL nor a title (below).
 - A credential matches when site key + username match. A match on a title key
   is `Match::Title`: like host-only, `plan` always skips it, even under
   `--update` (titles are labels, not sites), and it counts under
@@ -155,7 +156,9 @@ Apple's Credential Exchange on iPhone/iPad (README, Passkeys).
   `Unverified::host_only`.
 - A row with an empty password is never used to update, and is not counted
   as `not_compared` (it has nothing to compare).
-- Default `OnConflict::Skip` = create-missing only (no password reads at all).
+- Default `OnConflict::Skip` = create-missing only; it reads no passwords,
+  except to compare a row with neither a URL nor a title against existing
+  URL-less "Untitled Login" items of the same username.
   `--update` = `OnConflict::Update`, which reads the existing password of an
   exact (host + username) match and writes only if it differs (`unchanged`
   otherwise). Running twice ⇒ no changes.
