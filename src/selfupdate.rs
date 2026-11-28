@@ -9,8 +9,8 @@ use pk_cli_selfupdate::{SelfUpdateArgs, Updater};
 
 use crate::error::{Error, Result};
 
-pub fn run(args: &SelfUpdateArgs, json: bool, bin: &str) -> Result<()> {
-    updater(bin)
+pub fn run(args: &SelfUpdateArgs, json: bool, file: &str) -> Result<()> {
+    updater(file)
         .run(args, json, false)
         .map_err(|e| Error::Update(e.to_string()))
 }

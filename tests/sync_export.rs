@@ -1117,6 +1117,71 @@ fn the_gpm2op_alias_beside_pw2op_runs_it() {
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), "ran pw2op with: self-update --check\n");
+    assert!(
+        stderr(&out).contains("Call pw2op instead"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn the_alias_beside_the_real_pw2op_still_answers_as_gpm2op() {
+    let t = Scratch::new();
+    let dir = t.dir.path().join("installed");
+    std::fs::create_dir_all(&dir).unwrap();
+    let alias = dir.join("gpm2op");
+    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_pw2op"), dir.join("pw2op")).unwrap();
+
+    let help = t.command_of(&alias, &["--help"]).output().unwrap();
+    assert!(stdout(&help).contains("Usage: gpm2op"), "{}", stdout(&help));
+    let zsh = t
+        .command_of(&alias, &["completions", "zsh"])
+        .output()
+        .unwrap();
+    assert!(
+        stdout(&zsh).starts_with("#compdef gpm2op"),
+        "{}",
+        stdout(&zsh)
+    );
+    let export = t.export("google-passwords-export.csv");
+    let out = t
+        .command_of(&alias, &["--json", "sync", s(&export), "--dry-run"])
+        .env("FAKE_OP_LOG_ALIAS_ENV", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(one_json_document(&out)["schema"], "sync-result/v1");
+    // The variable the alias set is not passed on to op.
+    let log = fs::read_to_string(t.dir.path().join("op.log")).unwrap();
+    assert!(log.contains("invoked-as unset"), "{log}");
+    assert!(!log.contains("invoked-as gpm2op"), "{log}");
+}
+
+#[test]
+fn a_pw2op_that_is_a_copy_of_the_alias_does_not_loop() {
+    let t = Scratch::new();
+    let dir = t.dir.path().join("copied");
+    std::fs::create_dir_all(&dir).unwrap();
+    let alias = dir.join("gpm2op");
+    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), dir.join("pw2op")).unwrap();
+    let mut child = t
+        .command_of(&alias, &["--help"])
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if start.elapsed() > Duration::from_secs(10) {
+            child.kill().unwrap();
+            panic!("the alias kept execing itself");
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    let out = child.wait_with_output().unwrap();
+    assert!(out.status.success());
+    assert!(stdout(&out).contains("Usage: gpm2op"), "{}", stdout(&out));
 }
 
 #[test]

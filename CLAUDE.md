@@ -1,15 +1,18 @@
 # pw2op — internals
 
-Formerly gpm2op. The code is a library (`src/lib.rs`, `pw2op::main(bin)`)
-with two binaries: `pw2op` (`src/main.rs`) and the pre-rename alias `gpm2op`
-(`src/bin/gpm2op.rs`, a stderr note, then the same `main`). `bin` names the
-clap command, completions and the binary `self-update` replaces. Each release
+Formerly gpm2op. The code is a library (`src/lib.rs`, `pw2op::main(name,
+file)`) with two binaries: `pw2op` (`src/main.rs`) and the pre-rename alias
+`gpm2op` (`src/bin/gpm2op.rs`: a stderr note, then it execs an adjacent
+`pw2op` with `PW2OP_INVOKED_AS=gpm2op`, or calls the same `main` when there
+is none). `name` is the command typed, for clap and completions; `file` is
+the running executable, the one `self-update` replaces. The variable also
+stops a `pw2op` that is a copy of the alias from execing again. Each release
 archive carries both, because a 0.4.0 install's updater asks the old repo
 (GitHub redirects), takes the asset whose name contains its target triple and
 extracts the file named `gpm2op`; `release.yml` fails a release whose archive
 lacks either. With `pw2op` beside it the alias execs that binary, so both
-names run the release `pw2op self-update` installed; alone it runs its own
-copy. Keep the alias through v0.6.x. Before removing it, ship a release whose
+names run the release `pw2op self-update` installed, and help and completions
+still say `gpm2op`; alone it runs its own copy. Keep the alias through v0.6.x. Before removing it, ship a release whose
 alias tells the user to install `pw2op` (its note already does): an install
 holding only `gpm2op` cannot self-update once the archive drops that file.
 

@@ -47,8 +47,9 @@ address.
 - **`gpm2op` keeps working** for at least two releases (through v0.6.x). It
   is a second binary in every release and in `cargo install`, and prints one
   note on stderr; `--json` stdout is unchanged. With `pw2op` in the same
-  directory, `gpm2op` runs it, so both names run the same release and
-  `self-update` through either one updates `pw2op`. On its own, `gpm2op` runs
+  directory, `gpm2op` runs it (still answering as `gpm2op` in help and
+  completions), so both names run the same release and `self-update`
+  through either one updates `pw2op`. On its own, `gpm2op` runs
   its own copy of the code.
 - **Updating from gpm2op 0.4.0 or earlier:** `gpm2op self-update` replaces
   the `gpm2op` binary with the new release's alias, and nothing else. Install

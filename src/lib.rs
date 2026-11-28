@@ -1,6 +1,7 @@
 //! pw2op (formerly gpm2op) — upsert Google/Chrome and Apple Passwords/Safari
-//! exports into 1Password. The `pw2op` binary and the `gpm2op` alias both call
-//! [`main`] with their own name.
+//! exports into 1Password. The `pw2op` binary calls [`main`]; the `gpm2op`
+//! alias calls it only when no `pw2op` is beside it, and otherwise execs that
+//! `pw2op`, which then answers as `gpm2op`.
 
 mod cli;
 mod credential;
@@ -21,13 +22,14 @@ use std::path::Path;
 use std::process::ExitCode;
 use sync::{Mode, OnConflict};
 
-/// Run the CLI as the binary `bin` (`pw2op`, or the `gpm2op` alias): the
-/// name in help and completions, and the binary `self-update` replaces.
-pub fn main(bin: &'static str) -> ExitCode {
-    let matches = Cli::command().name(bin).bin_name(bin).get_matches();
+/// Run the CLI. `name` is the command the user typed (`pw2op` or `gpm2op`),
+/// used in help and completions; `file` is the executable that is running,
+/// the one `self-update` replaces. They differ when the alias execs `pw2op`.
+pub fn main(name: &'static str, file: &'static str) -> ExitCode {
+    let matches = Cli::command().name(name).bin_name(name).get_matches();
     let cli = Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit());
     let json_mode = cli.json;
-    match run(cli, bin) {
+    match run(cli, name, file) {
         Ok(code) => code,
         Err(err) => {
             let cli_err = to_cli_error(&err);
@@ -54,7 +56,7 @@ fn to_cli_error(err: &error::Error) -> pk_cli_core::CliError {
     }
 }
 
-fn run(cli: Cli, bin: &'static str) -> error::Result<ExitCode> {
+fn run(cli: Cli, name: &'static str, file: &'static str) -> error::Result<ExitCode> {
     let json = cli.json;
     match cli.command {
         Command::Check(args) => check(args, json),
@@ -62,12 +64,12 @@ fn run(cli: Cli, bin: &'static str) -> error::Result<ExitCode> {
             args.json |= json;
             do_sync(args)
         }
-        Command::SelfUpdate(args) => selfupdate::run(&args, json, bin).map(|()| ExitCode::SUCCESS),
+        Command::SelfUpdate(args) => selfupdate::run(&args, json, file).map(|()| ExitCode::SUCCESS),
         Command::Completions { shell } => {
             clap_complete::generate(
                 shell,
-                &mut Cli::command().name(bin),
-                bin,
+                &mut Cli::command().name(name),
+                name,
                 &mut std::io::stdout(),
             );
             Ok(ExitCode::SUCCESS)
