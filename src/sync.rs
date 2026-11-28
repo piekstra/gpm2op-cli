@@ -220,7 +220,7 @@ impl Index {
 
     /// Every existing login on this credential's site with its username. For
     /// a row with neither a URL nor a title, the URL-less logins titled like
-    /// the ones gpm2op creates for such rows; these are only ever compared by
+    /// the ones pw2op creates for such rows; these are only ever compared by
     /// password, never updated.
     fn exact(&self, cred: &Credential) -> Vec<String> {
         let want = cred.username.to_lowercase();

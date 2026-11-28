@@ -1,4 +1,4 @@
-# gpm2op — build contract. `make check` is the pre-push gate.
+# pw2op (formerly gpm2op) — build contract. `make check` is the pre-push gate.
 
 CARGO ?= cargo
 
@@ -34,5 +34,5 @@ clean:
 dev:
 	cargo build
 	@if [ -x "$$HOME/Dev/cli-common/scripts/dev-sign.sh" ]; then \
-		"$$HOME/Dev/cli-common/scripts/dev-sign.sh" target/debug/gpm2op; \
+		"$$HOME/Dev/cli-common/scripts/dev-sign.sh" target/debug/pw2op; \
 	else echo "cli-common/scripts/dev-sign.sh not found — binary left ad-hoc signed"; fi

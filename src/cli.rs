@@ -6,13 +6,13 @@ pub use pk_cli_selfupdate::SelfUpdateArgs;
 
 /// Catch your 1Password vault up to a Google/Chrome or Apple Passwords/Safari export.
 ///
-/// `gpm2op` reads a Chrome/Google or Apple Passwords/Safari passwords CSV and
+/// `pw2op` reads a Chrome/Google or Apple Passwords/Safari passwords CSV and
 /// idempotently upserts each login into 1Password via the `op` CLI: it creates
 /// the entries you don't have yet and, by default, leaves everything else
 /// untouched. Run it as often as you like — re-running only adds what's newly
 /// appeared.
 #[derive(Debug, Parser)]
-#[command(name = "gpm2op", version, about, long_about = None)]
+#[command(name = "pw2op", version, about, long_about = None)]
 pub struct Cli {
     /// Emit machine-readable JSON on stdout (diagnostics go to stderr).
     #[arg(long, global = true)]
@@ -28,10 +28,10 @@ pub enum Command {
     Sync(SyncArgs),
     /// Verify `op` is installed and signed in, and show the target vault.
     Check(CheckArgs),
-    /// Update gpm2op in place from the latest GitHub release.
+    /// Update pw2op in place from the latest GitHub release.
     SelfUpdate(SelfUpdateArgs),
 
-    /// Print a shell completion script (e.g. `gpm2op completions zsh`).
+    /// Print a shell completion script (e.g. `pw2op completions zsh`).
     Completions {
         /// Shell to generate completions for.
         #[arg(value_enum)]
@@ -65,7 +65,7 @@ pub struct SyncArgs {
     pub update: bool,
 
     /// Let --update edit existing logins, accepting that op's template edit
-    /// overwrites a passkey stored on one. gpm2op still refuses a login whose
+    /// overwrites a passkey stored on one. pw2op still refuses a login whose
     /// item JSON shows a passkey, but op does not reliably show one.
     #[arg(long, requires = "update")]
     pub force: bool,

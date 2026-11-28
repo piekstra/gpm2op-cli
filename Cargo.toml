@@ -1,16 +1,25 @@
 [package]
-name = "gpm2op"
-description = "Idempotently upsert Google/Chrome and Apple Passwords/Safari exports into 1Password via the op CLI."
-version = "0.4.0"
+name = "pw2op"
+description = "Idempotently upsert Google/Chrome and Apple Passwords/Safari exports into 1Password via the op CLI (formerly gpm2op)."
+version = "0.5.0"
 edition = "2021"
 rust-version = "1.82"
 license = "AGPL-3.0-only"
-repository = "https://github.com/piekstra/gpm2op-cli"
+repository = "https://github.com/piekstra/pw2op-cli"
 authors = ["piekstra"]
 
+[lib]
+name = "pw2op"
+path = "src/lib.rs"
+
+[[bin]]
+name = "pw2op"
+path = "src/main.rs"
+
+# The pre-rename name, kept for at least two releases (through v0.6.x).
 [[bin]]
 name = "gpm2op"
-path = "src/main.rs"
+path = "src/bin/gpm2op.rs"
 
 [dependencies]
 clap = { version = "4", features = ["derive", "wrap_help"] }

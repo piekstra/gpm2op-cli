@@ -1,7 +1,21 @@
 # Changelog
 
-## Unreleased
+## v0.5.0 — 2026-11-28
 
+- **Renamed to pw2op** ("passwords to 1Password"), since it reads Apple
+  Passwords / Safari as well as Google exports. The repository is now
+  `piekstra/pw2op-cli` (GitHub redirects the old name), and the crate and
+  binary are `pw2op`.
+- **`gpm2op` stays as an alias** for at least two releases (through v0.6.x):
+  a second binary in each release archive and `cargo install`, running the
+  same code with one stderr note. With `pw2op` in the same directory the
+  alias runs it, so both names run one release and either `self-update`
+  updates `pw2op`. A gpm2op 0.4.0 install's `self-update` finds this release
+  and replaces its `gpm2op` with the alias; install `pw2op` beside it before
+  v0.7, when the alias goes.
+- `PW2OP_EDIT_TIMEOUT` replaces `GPM2OP_EDIT_TIMEOUT`, which is still read
+  when the new one is unset. The `--update` temp file is now `pw2op-*.json`.
+- `info` reports `pw2op` and the new repository.
 - README: Safari's export should have only Passwords selected, and its
   unzipped folder is deleted with the `.zip`; a tag per run, and an undo that
   archives (`op item delete --archive -`).

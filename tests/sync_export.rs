@@ -58,8 +58,14 @@ impl Scratch {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_gpm2op"));
+        self.command_of(Path::new(env!("CARGO_BIN_EXE_pw2op")), args)
+    }
+
+    fn command_of(&self, exe: &Path, args: &[&str]) -> Command {
+        let mut cmd = Command::new(exe);
         cmd.args(args)
+            .env_remove("PW2OP_EDIT_TIMEOUT")
+            .env_remove("GPM2OP_EDIT_TIMEOUT")
             .env(
                 "PATH",
                 format!("{}:/usr/bin:/bin", repo("tests/support/bin").display()),
@@ -119,7 +125,7 @@ fn leftover_temp_files(dir: &Path) -> Vec<PathBuf> {
             p.file_name()
                 .unwrap()
                 .to_string_lossy()
-                .starts_with("gpm2op-")
+                .starts_with("pw2op-")
         })
         .collect()
 }
@@ -356,7 +362,7 @@ fn a_file_that_is_not_a_password_export_is_refused_before_op_runs() {
     assert_eq!(out.status.code(), Some(2), "{}", stderr(&out));
     assert!(export.exists());
     assert!(
-        stderr(&out).contains("not a password export gpm2op reads"),
+        stderr(&out).contains("not a password export pw2op reads"),
         "{}",
         stderr(&out)
     );
@@ -459,11 +465,11 @@ fn a_rejected_edit_timeout_warns_once_and_uses_the_default() {
     let export = t.export("google-passwords-export.csv");
     let out = t
         .command(&["sync", s(&export), "--update", "--force"])
-        .env("GPM2OP_EDIT_TIMEOUT", "2m")
+        .env("PW2OP_EDIT_TIMEOUT", "2m")
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
-    let warning = "warning: GPM2OP_EDIT_TIMEOUT=\"2m\" is not a whole number of seconds above 0; using the default of 120 s.";
+    let warning = "warning: PW2OP_EDIT_TIMEOUT=\"2m\" is not a whole number of seconds above 0; using the default of 120 s.";
     assert_eq!(stderr(&out).matches(warning).count(), 1, "{}", stderr(&out));
 }
 
@@ -530,14 +536,14 @@ fn wait_within(child: &mut std::process::Child, limit: Duration) -> std::process
         if Instant::now() >= until {
             let _ = child.kill();
             let _ = child.wait();
-            panic!("gpm2op still running after {limit:?}");
+            panic!("pw2op still running after {limit:?}");
         }
         std::thread::sleep(Duration::from_millis(20));
     }
 }
 
 #[test]
-fn a_sigterm_to_gpm2op_alone_reaches_op_and_removes_the_template() {
+fn a_sigterm_to_pw2op_alone_reaches_op_and_removes_the_template() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
     let mut child = t
@@ -547,7 +553,7 @@ fn a_sigterm_to_gpm2op_alone_reaches_op_and_removes_the_template() {
         .stderr(Stdio::null())
         .spawn()
         .unwrap();
-    // A supervisor's `kill <pid>`: the signal reaches gpm2op only, while op
+    // A supervisor's `kill <pid>`: the signal reaches pw2op only, while op
     // waits on a prompt nobody answers.
     let until = Instant::now() + Duration::from_secs(10);
     while templates(&t.log()).is_empty() {
@@ -584,7 +590,7 @@ fn an_edit_that_never_finishes_is_stopped_and_fails_its_row() {
     let out = t
         .command(&["--json", "sync", s(&export), "--update", "--force"])
         .env("FAKE_OP_EDIT_SLEEP", "30")
-        .env("GPM2OP_EDIT_TIMEOUT", "1")
+        .env("PW2OP_EDIT_TIMEOUT", "1")
         .output()
         .unwrap();
     assert!(
@@ -761,7 +767,7 @@ fn keep_all_imports_every_distinct_password_across_exports_once() {
         s(&apple),
         "--keep-all",
         "--tag",
-        "gpm2op-import",
+        "pw2op-import",
         "--tag",
         "second",
     ]);
@@ -779,7 +785,7 @@ fn keep_all_imports_every_distinct_password_across_exports_once() {
     assert_eq!(summary["unverified"]["not_compared"], 0);
     assert_eq!(
         summary["tags"],
-        serde_json::json!(["gpm2op-import", "second"])
+        serde_json::json!(["pw2op-import", "second"])
     );
     assert_eq!(summary["csv_deleted"], true);
     assert!(!chrome.exists() && !apple.exists());
@@ -787,7 +793,7 @@ fn keep_all_imports_every_distinct_password_across_exports_once() {
     let log = t.log();
     assert_eq!(log.matches("item get").count(), 1, "{log}");
     assert_eq!(
-        log.matches("--tags gpm2op-import,second").count(),
+        log.matches("--tags pw2op-import,second").count(),
         3,
         "{log}"
     );
@@ -1034,4 +1040,212 @@ fn a_row_with_no_url_and_no_title_is_not_created_twice() {
     let doc = one_json_document(&out);
     assert_eq!(doc["summary"]["created"], 1, "{doc}");
     assert!(!t.log().contains("item edit"), "{}", t.log());
+}
+
+/// A copy of the alias in a directory of its own, as a 0.4.0 install that
+/// self-updated has it: no `pw2op` beside it.
+fn lone_alias(t: &Scratch) -> std::path::PathBuf {
+    let dir = t.dir.path().join("lone");
+    std::fs::create_dir_all(&dir).unwrap();
+    let alias = dir.join("gpm2op");
+    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
+    alias
+}
+
+#[test]
+fn the_gpm2op_alias_alone_runs_pw2op_under_its_old_name() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let alias = lone_alias(&t);
+    let out = t
+        .command_of(&alias, &["--json", "sync", s(&export), "--dry-run"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(one_json_document(&out)["schema"], "sync-result/v1");
+    assert!(
+        stderr(&out).contains("gpm2op is now pw2op"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        stderr(&out).contains("Install pw2op beside"),
+        "{}",
+        stderr(&out)
+    );
+
+    let help = t.command_of(&alias, &["--help"]).output().unwrap();
+    assert!(stdout(&help).contains("Usage: gpm2op"), "{}", stdout(&help));
+    let help = t.run(&["--help"]);
+    assert!(stdout(&help).contains("Usage: pw2op"), "{}", stdout(&help));
+
+    // Completions register the name the user runs.
+    let zsh = t
+        .command_of(&alias, &["completions", "zsh"])
+        .output()
+        .unwrap();
+    assert!(
+        stdout(&zsh).starts_with("#compdef gpm2op"),
+        "{}",
+        stdout(&zsh)
+    );
+    let zsh = t.run(&["completions", "zsh"]);
+    assert!(
+        stdout(&zsh).starts_with("#compdef pw2op"),
+        "{}",
+        stdout(&zsh)
+    );
+}
+
+#[test]
+fn the_gpm2op_alias_beside_pw2op_runs_it() {
+    let t = Scratch::new();
+    let dir = t.dir.path().join("both");
+    std::fs::create_dir_all(&dir).unwrap();
+    let alias = dir.join("gpm2op");
+    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
+    // A stand-in pw2op that records its arguments, so the test shows which
+    // binary ran.
+    let pw2op = dir.join("pw2op");
+    std::fs::write(&pw2op, "#!/bin/sh\necho \"ran pw2op with: $*\"\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&pw2op, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = t
+        .command_of(&alias, &["self-update", "--check"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "ran pw2op with: self-update --check\n");
+}
+
+#[test]
+fn the_alias_beside_the_real_pw2op_still_answers_as_gpm2op() {
+    let t = Scratch::new();
+    let dir = t.dir.path().join("installed");
+    std::fs::create_dir_all(&dir).unwrap();
+    let alias = dir.join("gpm2op");
+    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
+    std::fs::copy(env!("CARGO_BIN_EXE_pw2op"), dir.join("pw2op")).unwrap();
+
+    let help = t.command_of(&alias, &["--help"]).output().unwrap();
+    assert!(stdout(&help).contains("Usage: gpm2op"), "{}", stdout(&help));
+    // One note, from the pw2op that ran.
+    assert_eq!(
+        stderr(&help).matches("note:").count(),
+        1,
+        "{}",
+        stderr(&help)
+    );
+    assert!(
+        stderr(&help).contains("Call pw2op instead"),
+        "{}",
+        stderr(&help)
+    );
+    let zsh = t
+        .command_of(&alias, &["completions", "zsh"])
+        .output()
+        .unwrap();
+    assert!(
+        stdout(&zsh).starts_with("#compdef gpm2op"),
+        "{}",
+        stdout(&zsh)
+    );
+    let export = t.export("google-passwords-export.csv");
+    let out = t
+        .command_of(&alias, &["--json", "sync", s(&export), "--dry-run"])
+        .env("FAKE_OP_LOG_ALIAS_ENV", "1")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(one_json_document(&out)["schema"], "sync-result/v1");
+    // The variable the alias set is not passed on to op.
+    let log = fs::read_to_string(t.dir.path().join("op.log")).unwrap();
+    assert!(log.contains("invoked-as unset"), "{log}");
+    assert!(!log.contains("invoked-as gpm2op"), "{log}");
+}
+
+/// Run `exe --help` with a 10 s bound, so an exec loop fails the test.
+fn bounded_help(t: &Scratch, exe: &Path) -> Output {
+    let mut child = t
+        .command_of(exe, &["--help"])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let start = Instant::now();
+    while child.try_wait().unwrap().is_none() {
+        if start.elapsed() > Duration::from_secs(10) {
+            child.kill().unwrap();
+            panic!("{} kept execing itself", exe.display());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn a_pw2op_that_is_the_alias_again_does_not_loop_and_says_so() {
+    for link in [false, true] {
+        let t = Scratch::new();
+        let dir = t.dir.path().join("copied");
+        fs::create_dir_all(&dir).unwrap();
+        let alias = dir.join("gpm2op");
+        fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
+        let pw2op = dir.join("pw2op");
+        if link {
+            std::os::unix::fs::symlink("gpm2op", &pw2op).unwrap();
+        } else {
+            fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &pw2op).unwrap();
+        }
+        for exe in [&alias, &pw2op] {
+            let out = bounded_help(&t, exe);
+            assert!(out.status.success(), "link={link} {}", exe.display());
+            assert!(stdout(&out).contains("Usage: gpm2op"), "{}", stdout(&out));
+            let err = stderr(&out);
+            assert!(
+                err.contains("is the gpm2op alias, not pw2op"),
+                "link={link}: {err}"
+            );
+            assert!(!err.contains("Call pw2op instead"), "link={link}: {err}");
+        }
+    }
+}
+
+#[test]
+fn the_new_edit_timeout_variable_wins_over_the_old_one() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t
+        .command(&["sync", s(&export), "--update", "--force"])
+        .env("PW2OP_EDIT_TIMEOUT", "new")
+        .env("GPM2OP_EDIT_TIMEOUT", "old")
+        .output()
+        .unwrap();
+    assert!(
+        stderr(&out).contains("warning: PW2OP_EDIT_TIMEOUT=\"new\""),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        !stderr(&out).contains("GPM2OP_EDIT_TIMEOUT"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn the_pre_rename_edit_timeout_variable_still_counts() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t
+        .command(&["sync", s(&export), "--update", "--force"])
+        .env("GPM2OP_EDIT_TIMEOUT", "2m")
+        .output()
+        .unwrap();
+    assert!(
+        stderr(&out).contains("warning: GPM2OP_EDIT_TIMEOUT=\"2m\""),
+        "{}",
+        stderr(&out)
+    );
 }

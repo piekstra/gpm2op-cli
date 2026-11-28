@@ -5,7 +5,7 @@ title: ""
 labels: enhancement
 ---
 
-**What would you like gpm2op to do**
+**What would you like pw2op to do**
 The command or capability you're missing.
 
 **Why**

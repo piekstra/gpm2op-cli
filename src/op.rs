@@ -234,11 +234,11 @@ impl Op {
     /// The file is removed as soon as `op` returns: `NamedTempFile` deletes it
     /// when dropped, on every return and on a panic. `SignalHold` defers a stop
     /// signal until after that drop, and `run_held` forwards it to `op` and
-    /// bounds the wait (`GPM2OP_EDIT_TIMEOUT`).
+    /// bounds the wait (`PW2OP_EDIT_TIMEOUT`).
     pub fn edit_from_template(&self, id: &str, template_json: &str) -> Result<()> {
         let hold = SignalHold::new();
         let mut tmp = tempfile::Builder::new()
-            .prefix("gpm2op-")
+            .prefix("pw2op-")
             .suffix(".json")
             .tempfile()?;
         // tempfile creates the file with 0600 on Unix by default.
@@ -289,18 +289,22 @@ const DEFAULT_EDIT_TIMEOUT: Duration = Duration::from_secs(120);
 const STOP_GRACE: Duration = Duration::from_secs(5);
 const POLL: Duration = Duration::from_millis(20);
 
-/// How long `op item edit` may run: `GPM2OP_EDIT_TIMEOUT` seconds, else 120.
+/// How long `op item edit` may run: `PW2OP_EDIT_TIMEOUT` seconds (or the
+/// pre-rename `GPM2OP_EDIT_TIMEOUT` when that is unset), else 120.
 /// A value that is set but rejected gets one stderr warning per run.
 fn edit_timeout() -> Duration {
     static TIMEOUT: OnceLock<Duration> = OnceLock::new();
     *TIMEOUT.get_or_init(|| {
-        let raw = std::env::var_os("GPM2OP_EDIT_TIMEOUT");
+        let (name, raw) = ["PW2OP_EDIT_TIMEOUT", "GPM2OP_EDIT_TIMEOUT"]
+            .into_iter()
+            .find_map(|name| std::env::var_os(name).map(|v| (name, Some(v))))
+            .unwrap_or(("PW2OP_EDIT_TIMEOUT", None));
         let raw = raw.as_ref().map(|v| v.to_string_lossy());
         match parse_edit_timeout(raw.as_deref()) {
             Ok(limit) => limit,
             Err(rejected) => {
                 eprintln!(
-                    "warning: GPM2OP_EDIT_TIMEOUT={rejected:?} is not a whole number of seconds \
+                    "warning: {name}={rejected:?} is not a whole number of seconds \
                      above 0; using the default of {} s.",
                     DEFAULT_EDIT_TIMEOUT.as_secs()
                 );
@@ -310,7 +314,7 @@ fn edit_timeout() -> Duration {
     })
 }
 
-/// The edit bound from `GPM2OP_EDIT_TIMEOUT`'s value: unset means the
+/// The edit bound from `PW2OP_EDIT_TIMEOUT`'s value: unset means the
 /// default; a whole number of seconds above 0, surrounding whitespace
 /// allowed, is taken; anything else comes back as `Err` with the value.
 fn parse_edit_timeout(raw: Option<&str>) -> std::result::Result<Duration, String> {
@@ -375,11 +379,11 @@ fn supervise(child: &mut Child, hold: &SignalHold, limit: Duration) -> std::io::
 
 /// Defers SIGINT, SIGTERM, SIGHUP and SIGQUIT while it lives, so a stop
 /// signal ends the process only after the revealed item's temp file is gone.
-/// `supervise` forwards a held signal to `op`, since a signal sent to gpm2op
+/// `supervise` forwards a held signal to `op`, since a signal sent to pw2op
 /// alone (`kill`, `timeout`, a supervisor) never reaches it. When the hold
 /// drops, the pending signal is delivered, and re-raised if it was not.
 ///
-/// The mask is per thread, so the hold assumes gpm2op is single-threaded
+/// The mask is per thread, so the hold assumes pw2op is single-threaded
 /// while it lives, apart from threads started under it, which inherit the
 /// mask. Any other thread that leaves these signals unblocked would take a
 /// process-directed one and end the process with the file still on disk.

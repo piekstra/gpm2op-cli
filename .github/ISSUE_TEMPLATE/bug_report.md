@@ -16,6 +16,6 @@ CSV row is involved, describe it with placeholder values.
 Paste the relevant output (it never contains passwords).
 
 **Environment**
-- `gpm2op --version`:
+- `pw2op --version`:
 - `op --version`:
 - OS:

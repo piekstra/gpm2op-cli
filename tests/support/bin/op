@@ -9,9 +9,10 @@
 #                      item-get-revealed.json)
 #   FAKE_OP_ITEM_GET_FAIL  when set, `op item get` fails
 #   FAKE_OP_LOG        file each call's argv is appended to, one line per call
+#   FAKE_OP_LOG_ALIAS_ENV  when set, also log PW2OP_INVOKED_AS as op sees it
 #   FAKE_OP_EDIT_FAIL  when set, `op item edit` fails after recording its template
 #   FAKE_OP_EDIT_SIGNAL  when set (INT, TERM, ...), `op item edit` sends that
-#                      signal to gpm2op and fails, as a Ctrl-C mid-edit would
+#                      signal to pw2op and fails, as a Ctrl-C mid-edit would
 #   FAKE_OP_EDIT_SLEEP when set, `op item edit` becomes `sleep` for that many
 #                      seconds, as op waiting on a prompt nobody answers would
 #   FAKE_OP_CREATED    file each `op item create` template (stdin) is appended
@@ -24,6 +25,7 @@ set -eu
 : "${FAKE_OP_DIR:?FAKE_OP_DIR is not set}"
 log="${FAKE_OP_LOG:-/dev/null}"
 printf 'argv %s\n' "$*" >>"$log"
+[ -n "${FAKE_OP_LOG_ALIAS_ENV:-}" ] && printf 'invoked-as %s\n' "${PW2OP_INVOKED_AS-unset}" >>"$log"
 
 if [ "${1:-}" = "--account" ]; then
 	shift 2
