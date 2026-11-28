@@ -12,5 +12,8 @@ fn main() -> std::process::ExitCode {
     };
     // Not passed on to `op` or anything else this run starts.
     std::env::remove_var(ALIAS_ENV);
+    if name == "gpm2op" {
+        eprintln!("note: gpm2op is now pw2op. Call pw2op instead: gpm2op is removed after v0.6.x.");
+    }
     pw2op::main(name, "pw2op")
 }

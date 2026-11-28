@@ -1117,11 +1117,6 @@ fn the_gpm2op_alias_beside_pw2op_runs_it() {
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
     assert_eq!(stdout(&out), "ran pw2op with: self-update --check\n");
-    assert!(
-        stderr(&out).contains("Call pw2op instead"),
-        "{}",
-        stderr(&out)
-    );
 }
 
 #[test]
@@ -1135,6 +1130,18 @@ fn the_alias_beside_the_real_pw2op_still_answers_as_gpm2op() {
 
     let help = t.command_of(&alias, &["--help"]).output().unwrap();
     assert!(stdout(&help).contains("Usage: gpm2op"), "{}", stdout(&help));
+    // One note, from the pw2op that ran.
+    assert_eq!(
+        stderr(&help).matches("note:").count(),
+        1,
+        "{}",
+        stderr(&help)
+    );
+    assert!(
+        stderr(&help).contains("Call pw2op instead"),
+        "{}",
+        stderr(&help)
+    );
     let zsh = t
         .command_of(&alias, &["completions", "zsh"])
         .output()
@@ -1158,16 +1165,10 @@ fn the_alias_beside_the_real_pw2op_still_answers_as_gpm2op() {
     assert!(!log.contains("invoked-as gpm2op"), "{log}");
 }
 
-#[test]
-fn a_pw2op_that_is_a_copy_of_the_alias_does_not_loop() {
-    let t = Scratch::new();
-    let dir = t.dir.path().join("copied");
-    std::fs::create_dir_all(&dir).unwrap();
-    let alias = dir.join("gpm2op");
-    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
-    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), dir.join("pw2op")).unwrap();
+/// Run `exe --help` with a 10 s bound, so an exec loop fails the test.
+fn bounded_help(t: &Scratch, exe: &Path) -> Output {
     let mut child = t
-        .command_of(&alias, &["--help"])
+        .command_of(exe, &["--help"])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -1176,18 +1177,39 @@ fn a_pw2op_that_is_a_copy_of_the_alias_does_not_loop() {
     while child.try_wait().unwrap().is_none() {
         if start.elapsed() > Duration::from_secs(10) {
             child.kill().unwrap();
-            panic!("the alias kept execing itself");
+            panic!("{} kept execing itself", exe.display());
         }
         std::thread::sleep(Duration::from_millis(50));
     }
-    let out = child.wait_with_output().unwrap();
-    assert!(out.status.success());
-    assert!(stdout(&out).contains("Usage: gpm2op"), "{}", stdout(&out));
-    assert!(
-        stderr(&out).contains("this pw2op is a copy of the gpm2op alias"),
-        "{}",
-        stderr(&out)
-    );
+    child.wait_with_output().unwrap()
+}
+
+#[test]
+fn a_pw2op_that_is_the_alias_again_does_not_loop_and_says_so() {
+    for link in [false, true] {
+        let t = Scratch::new();
+        let dir = t.dir.path().join("copied");
+        fs::create_dir_all(&dir).unwrap();
+        let alias = dir.join("gpm2op");
+        fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
+        let pw2op = dir.join("pw2op");
+        if link {
+            std::os::unix::fs::symlink("gpm2op", &pw2op).unwrap();
+        } else {
+            fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &pw2op).unwrap();
+        }
+        for exe in [&alias, &pw2op] {
+            let out = bounded_help(&t, exe);
+            assert!(out.status.success(), "link={link} {}", exe.display());
+            assert!(stdout(&out).contains("Usage: gpm2op"), "{}", stdout(&out));
+            let err = stderr(&out);
+            assert!(
+                err.contains("is the gpm2op alias, not pw2op"),
+                "link={link}: {err}"
+            );
+            assert!(!err.contains("Call pw2op instead"), "link={link}: {err}");
+        }
+    }
 }
 
 #[test]

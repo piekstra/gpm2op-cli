@@ -12,42 +12,41 @@ use std::process::ExitCode;
 /// run was already handed on once.
 const ALIAS_ENV: &str = "PW2OP_INVOKED_AS";
 
-const MOVE_NOTE: &str =
-    "note: gpm2op is now pw2op. Call pw2op instead: gpm2op is removed after v0.6.x.";
-const COPY_NOTE: &str = "note: this pw2op is a copy of the gpm2op alias. Run `pw2op self-update` \
-to replace it with the real pw2op from the latest release.";
+const COPY_NOTE: &str = "note: this pw2op is the gpm2op alias, not pw2op. Replace it with pw2op \
+from the release archive, or run `cargo install --git https://github.com/piekstra/pw2op-cli --force` \
+(https://github.com/piekstra/pw2op-cli#renamed-from-gpm2op).";
 const INSTALL_NOTE: &str = "note: gpm2op is now pw2op. Install pw2op beside this command \
 (https://github.com/piekstra/pw2op-cli#renamed-from-gpm2op): gpm2op is removed after v0.6.x, \
 and an install with only gpm2op cannot update itself after that.";
 
 fn main() -> ExitCode {
-    // A run already handed on (a `pw2op` that is a copy of or link to this
-    // alias) runs here instead of execing again.
+    // Set when the alias exec'd a `pw2op` that turned out to be the alias
+    // again (a copy, or a link that the OS resolved back to this file).
     let handed_on = std::env::var_os(ALIAS_ENV).is_some();
     std::env::remove_var(ALIAS_ENV);
-    #[cfg(unix)]
-    if !handed_on {
-        if let Some(pw2op) = sibling() {
-            use std::os::unix::process::CommandExt;
-            eprintln!("{MOVE_NOTE}");
-            let err = std::process::Command::new(&pw2op)
-                .args(std::env::args_os().skip(1))
-                .env(ALIAS_ENV, "gpm2op")
-                .exec();
-            eprintln!(
-                "warning: could not run {}: {err}; running gpm2op's own copy.",
-                pw2op.display()
-            );
-            return pw2op::main("gpm2op", "gpm2op");
-        }
-    }
-    // A copy of the alias saved as `pw2op`: its self-update installs the
-    // real `pw2op` into that file.
-    if own_name().as_deref() == Some("pw2op") {
+    let named_pw2op = own_name().as_deref() == Some("pw2op");
+    if handed_on || named_pw2op {
         eprintln!("{COPY_NOTE}");
-        return pw2op::main("gpm2op", "pw2op");
+        // Under its own name `pw2op`, a newer release's self-update replaces
+        // this file with the real pw2op. Reached through a link, the running
+        // file is the alias itself, so it updates as the alias.
+        let file = if named_pw2op { "pw2op" } else { "gpm2op" };
+        return pw2op::main("gpm2op", file);
     }
-    eprintln!("{}", if handed_on { MOVE_NOTE } else { INSTALL_NOTE });
+    #[cfg(unix)]
+    if let Some(pw2op) = sibling() {
+        use std::os::unix::process::CommandExt;
+        // The pw2op it runs prints the note about the new name.
+        let err = std::process::Command::new(&pw2op)
+            .args(std::env::args_os().skip(1))
+            .env(ALIAS_ENV, "gpm2op")
+            .exec();
+        eprintln!(
+            "warning: could not run {}: {err}; running gpm2op's own copy.",
+            pw2op.display()
+        );
+    }
+    eprintln!("{INSTALL_NOTE}");
     pw2op::main("gpm2op", "gpm2op")
 }
 
