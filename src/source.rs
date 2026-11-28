@@ -50,13 +50,18 @@ impl Format {
     }
 
     /// Decide the format from a header's lowercased, trimmed column names.
+    /// Google documents only `url,username,password` as required, so a
+    /// header with those and no `title` is read as Chrome's, `name` or not.
+    /// One with both `name` and `title` is ambiguous and refused.
     fn detect(columns: &[String]) -> Option<Format> {
         let has = |name: &str| columns.iter().any(|c| c == name);
-        let common = has("url") && has("username") && has("password");
-        match (common && has("name"), common && has("title")) {
-            (true, false) => Some(Format::Chrome),
+        if !(has("url") && has("username") && has("password")) {
+            return None;
+        }
+        match (has("name"), has("title")) {
+            (_, false) => Some(Format::Chrome),
             (false, true) => Some(Format::Apple),
-            _ => None,
+            (true, true) => None,
         }
     }
 }
@@ -111,8 +116,9 @@ pub fn read_csv(path: &Path) -> Result<Export> {
     let format = Format::detect(&columns).ok_or_else(|| {
         Error::Csv(format!(
             "{}: not a password export gpm2op reads. Its first line ({} column(s)) is neither \
-             Chrome / Google Password Manager's header (name,url,username,password,note) nor \
-             Apple Passwords / Safari's (Title,URL,Username,Password,Notes,OTPAuth).",
+             Chrome / Google Password Manager's header (name,url,username,password,note; \
+             url,username,password at least) nor Apple Passwords / Safari's \
+             (Title,URL,Username,Password,Notes,OTPAuth), and not both name and title.",
             path.display(),
             columns.len()
         ))
@@ -231,6 +237,15 @@ mod tests {
         let err = read_csv(f.path()).unwrap_err().to_string();
         assert!(!err.contains("hunter2"), "{err}");
         assert!(!err.contains("example.com/"), "{err}");
+    }
+
+    #[test]
+    fn url_username_password_alone_reads_as_chrome() {
+        let cols: Vec<String> = ["url", "username", "password"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        assert_eq!(Format::detect(&cols), Some(Format::Chrome));
     }
 
     #[test]

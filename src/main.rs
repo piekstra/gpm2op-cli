@@ -44,6 +44,7 @@ fn to_cli_error(err: &error::Error) -> pk_cli_core::CliError {
         E::OpMissing | E::Csv(_) => CliError::Usage(err.to_string()),
         E::Op(m) | E::Parse(m) => CliError::Upstream(m.clone()),
         E::Update(m) => CliError::Other(m.clone()),
+        E::Confirm(m) => CliError::ConfirmationRequired(m.clone()),
         _ => CliError::Other(err.to_string()),
     }
 }
@@ -101,6 +102,15 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
     // Every export is read, and its format decided, before `op` is touched,
     // so a wrong file costs no 1Password prompt.
     reject_repeated_paths(&args.csv)?;
+    if args.update && !args.dry_run && !args.force {
+        return Err(error::Error::Confirm(
+            "--update rewrites each changed login from a JSON template, and op overwrites a \
+             passkey stored on the login, which op's item JSON does not reliably show. Rerun with \
+             --force once those logins hold no passkey you need (or before passkeys are moved \
+             into 1Password); --dry-run shows what would be updated."
+                .into(),
+        ));
+    }
     let mut sources = Vec::with_capacity(args.csv.len());
     let mut snapshots = Vec::with_capacity(args.csv.len());
     let mut creds: Vec<Credential> = Vec::new();
@@ -205,7 +215,7 @@ fn do_sync(args: SyncArgs) -> error::Result<ExitCode> {
             report::print_notes(&summary, &run);
         }
         for source in sources.iter().filter(|s| s.deleted) {
-            println!("{}", report::deleted_line(source, &summary.unverified));
+            println!("{}", report::deleted_line(source, &summary));
         }
     }
     for (path, why) in &kept {

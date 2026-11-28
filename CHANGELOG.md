@@ -8,10 +8,18 @@
   line names the format, and `--json` gives `summary.format` (`chrome`,
   `apple` or `mixed`). Title becomes the item title, Notes the notes, and an
   `otpauth://` value a one-time password field (`summary.otp`); any other
-  OTPAuth value is not imported and stderr names its row.
+  OTPAuth value is not imported; a real run names its row on stderr and
+  `--json` lists it in `summary.otp.ignored_rows`.
 - **A file whose header is neither format is refused** with exit 2 before `op`
   is called, and the error does not repeat the header. It used to sync
-  nothing and exit 0.
+  nothing and exit 0. A header needs `url`, `username` and `password`; one
+  with both `name` and `title`, which used to sync, is now refused: drop one
+  of the two columns. A header without `name` still reads as Chrome's.
+- **`--update` needs `--force` outside a dry run** (exit 6 without it, before
+  `op` is called). `op`'s template edit overwrites a passkey stored on a
+  login, and `op`'s item JSON does not reliably show one, so a script that
+  passed `--update` alone now stops. A login whose JSON does show a passkey is
+  still refused, and that row fails.
 - **Rows with no password** are imported without a password field, and
   `--update` never uses one to blank a stored password.
 - **Several exports in one `sync`**, of either format, matched together. A
@@ -19,16 +27,26 @@
   each export's path, format, rows, unreadable rows and whether it was deleted;
   `csv_deleted` is true when all were. Each item gives its `file` and `row`.
 - **`--keep-all`** imports every distinct site, username and password as its
-  own login, for exports that disagree. Exact repeats across the run's files
-  are imported once (`summary.repeats`), a login already in the vault with the
+  own login, for exports that disagree. Repeats across the run's files are
+  imported once (`summary.repeats`; a repeat with a different one-time
+  password is kept as its own login), a login already in the vault with the
   same password is not created again, and nothing existing is changed.
   `summary.conflicting_logins` counts the site and username pairs with more
-  than one password. Not combinable with `--update`. The default upsert is
+  than one password. Not combinable with `--update`. Two exports named as the
+  same file are refused (exit 2). The default upsert is
   unchanged.
 - **`--tag TAG`** (repeatable) tags every login a run creates, so an import can
   be found and undone; the README has the `op` commands.
-- **`--update` never edits a login that holds a passkey**, since `op`'s JSON
-  template edit overwrites it; that row fails and says so.
+- **Rows for the same site and username** in the default mode: the last row
+  still wins, but a password, one-time password or note it lacks comes from
+  the earlier row, so a passwordless row no longer creates a login without
+  one.
+- **A row with no URL** matches a login with no URL by title, so a rerun no
+  longer creates it again.
+- **The deletion line claims everything is in 1Password only when it is**:
+  also no one-time password or note left out (`summary.otp.not_added`,
+  `summary.otp.ignored_rows`, `summary.notes_not_added`, each with a stderr
+  note).
 - Notes name unreadable rows by row number; the "still in …" wording names
   the password manager each export came from.
 - README: Apple and Safari export steps, the passkey transfer from Apple

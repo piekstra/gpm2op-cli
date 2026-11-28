@@ -36,6 +36,9 @@ pub enum Error {
     #[error("i/o error: {0}")]
     Io(#[from] std::io::Error),
 
+    #[error("{0}")]
+    Confirm(String),
+
     #[error("self-update failed: {0}")]
     Update(String),
 }

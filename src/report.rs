@@ -197,6 +197,7 @@ pub fn print_json(outcomes: &[Outcome], summary: &Summary, run: &RunReport) {
                 "not_added": summary.otp.not_added,
                 "ignored_rows": ignored,
             },
+            "notes_not_added": summary.notes_not_added,
             "csv_deleted": !run.sources.is_empty() && run.sources.iter().all(|s| s.deleted),
             "sources": sources,
             "unverified": {
@@ -232,13 +233,30 @@ fn notes(summary: &Summary, run: &RunReport) -> Vec<String> {
     if summary.conflicting_logins > 0 {
         let tagged = match run.tags {
             [] => String::new(),
-            tags => format!(", tagged {}", tags.join(", ")),
+            tags => format!(
+                " The logins this run created are tagged {}; one that was already in 1Password \
+                 is not.",
+                tags.join(", ")
+            ),
+        };
+        let failed = if summary.failed > 0 {
+            " Rows that failed were not created."
+        } else {
+            ""
         };
         notes.push(format!(
-            "{} site and username pair(s) have more than one password across the exports. Each \
-             password is its own login{tagged}; sign in to find the current one, then delete the \
-             others in 1Password.",
+            "{} site and username pair(s) have more than one password across the exports, and \
+             each password is kept as its own login.{tagged}{failed} Search 1Password by site and \
+             username to see every candidate, sign in to find the current one, then delete the \
+             others.",
             summary.conflicting_logins
+        ));
+    }
+    if summary.notes_not_added > 0 {
+        notes.push(format!(
+            "{} row(s) had a note for a login that already exists in 1Password, and it was not \
+             added to that login. It is still in {keeper}.",
+            summary.notes_not_added
         ));
     }
     if summary.otp.not_added > 0 {
@@ -279,7 +297,9 @@ fn unverified_notes(u: &Unverified, keeper: &str, sources: &[Source]) -> Vec<Str
     if u.deduped > 0 {
         notes.push(format!(
             "{} row(s) repeated a later row's site and username, and only the later row was \
-             synced. The earlier passwords are still in {keeper}; --keep-all imports every one.",
+             synced, with any password, code or note it lacked taken from the earlier row. The \
+             earlier passwords and codes are still in {keeper}; --keep-all imports every \
+             password.",
             u.deduped
         ));
     }
@@ -315,16 +335,17 @@ pub fn print_check_json(vault: &str, logins: usize) {
     }));
 }
 
-/// The human line for an export that was deleted.
-pub fn deleted_line(source: &Source, u: &Unverified) -> String {
+/// The human line for an export that was deleted. It says 1Password holds
+/// everything only when `Summary::complete`.
+pub fn deleted_line(source: &Source, summary: &Summary) -> String {
     let csv = &source.path;
     let keeper = source.format.keeper();
-    if u.total() == 0 {
+    if summary.complete() {
         format!("Deleted the export at {csv}: every credential read from it is in 1Password now.")
     } else {
         format!(
             "Deleted the export at {csv}. {keeper} still holds every password in it, including \
-             the rows above that were not checked against 1Password."
+             what the notes above say did not reach 1Password."
         )
     }
 }
@@ -445,32 +466,49 @@ mod tests {
         assert_eq!(notes.len(), 4, "{notes:?}");
         assert!(notes[0]
             .starts_with("2 row(s) repeated an earlier row's site, username and password exactly"));
-        assert!(notes[1].contains("Each password is its own login, tagged import-1"));
+        assert!(notes[1].contains("The logins this run created are tagged import-1; one that was already in 1Password is not."));
         assert!(notes[2].contains("It is still in Apple Passwords."));
         assert!(notes[3].contains("(row 4 of a.csv)"));
     }
 
     #[test]
-    fn the_deleted_line_claims_1password_only_when_every_row_was_checked() {
+    fn the_deleted_line_claims_1password_only_when_everything_reached_it() {
         let chrome = source("x.csv", Format::Chrome);
-        let all = deleted_line(&chrome, &Unverified::default());
+        let all = deleted_line(&chrome, &Summary::default());
         assert!(all.contains("every credential read from it is in 1Password now"));
-        let some = deleted_line(
-            &chrome,
-            &Unverified {
-                not_compared: 1,
-                ..Unverified::default()
+        let partial = [
+            Summary {
+                unverified: Unverified {
+                    not_compared: 1,
+                    ..Unverified::default()
+                },
+                ..Summary::default()
             },
-        );
-        assert!(!some.contains("is in 1Password now"), "{some}");
-        assert!(some.contains("Google Password Manager still holds every password"));
-        let apple = deleted_line(
-            &source("a.csv", Format::Apple),
-            &Unverified {
-                deduped: 1,
-                ..Unverified::default()
+            Summary {
+                otp: crate::sync::OtpCounts {
+                    not_added: 1,
+                    ..Default::default()
+                },
+                ..Summary::default()
             },
-        );
+            Summary {
+                otp: crate::sync::OtpCounts {
+                    ignored: vec![Origin { file: 0, row: 2 }],
+                    ..Default::default()
+                },
+                ..Summary::default()
+            },
+            Summary {
+                notes_not_added: 1,
+                ..Summary::default()
+            },
+        ];
+        for summary in &partial {
+            let some = deleted_line(&chrome, summary);
+            assert!(!some.contains("is in 1Password now"), "{some}");
+            assert!(some.contains("Google Password Manager still holds every password"));
+        }
+        let apple = deleted_line(&source("a.csv", Format::Apple), &partial[0]);
         assert!(
             apple.contains("Apple Passwords still holds every password"),
             "{apple}"

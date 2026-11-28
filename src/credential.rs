@@ -60,25 +60,23 @@ impl Credential {
         host_of(&self.url)
     }
 
-    /// Stable identity for de-duplicating CSV rows: (host, lowercased username).
-    pub fn identity(&self) -> (String, String) {
-        (
-            self.host().unwrap_or_default(),
-            self.username.to_lowercase(),
-        )
+    /// The key a login is matched on: its normalized host, or, for a row with
+    /// no URL, its lowercased title (`site_key_for`).
+    pub fn site_key(&self) -> String {
+        site_key_for(self.host(), &self.title)
     }
 
-    /// Identity for keeping every password: the site, the lowercased
-    /// username, the password and the one-time-password secret. Two rows
-    /// with the same identity are exact repeats.
-    pub fn secret_identity(&self) -> (String, String, String, String) {
-        let (host, username) = self.identity();
-        (
-            host,
-            username,
-            self.password.clone(),
-            self.otp.clone().unwrap_or_default(),
-        )
+    /// Stable identity for de-duplicating CSV rows: (site key, lowercased
+    /// username).
+    pub fn identity(&self) -> (String, String) {
+        (self.site_key(), self.username.to_lowercase())
+    }
+
+    /// Identity for keeping every password: the site key, the lowercased
+    /// username and the password.
+    pub fn secret_identity(&self) -> (String, String, String) {
+        let (site, username) = self.identity();
+        (site, username, self.password.clone())
     }
 
     /// The op JSON template to create this login (piped to `op item create -`).
@@ -126,6 +124,12 @@ impl Credential {
         }
         item.to_string()
     }
+}
+
+/// A host, or `title:<lowercased title>` for a login with no URL, so two
+/// URL-less logins match only when their titles do.
+pub fn site_key_for(host: Option<String>, title: &str) -> String {
+    host.unwrap_or_else(|| format!("title:{}", title.trim().to_lowercase()))
 }
 
 /// Extract a normalized host from a URL string: lowercase, `www.` stripped.
@@ -229,5 +233,11 @@ mod tests {
             c.identity(),
             ("site.com".to_string(), "jane@example.com".to_string())
         );
+        let no_url = Credential {
+            title: "Router".into(),
+            username: "admin".into(),
+            ..Credential::default()
+        };
+        assert_eq!(no_url.site_key(), "title:router");
     }
 }

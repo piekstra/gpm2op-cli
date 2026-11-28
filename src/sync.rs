@@ -3,7 +3,7 @@
 //! passwords). Keep-all mode instead creates a login for every distinct site,
 //! username and password, so conflicting exports lose nothing.
 
-use crate::credential::{host_of, Credential, Origin};
+use crate::credential::{host_of, site_key_for, Credential, Origin};
 use crate::error::{Error, Result};
 use crate::op::{Op, OpItem};
 use std::collections::{HashMap, HashSet};
@@ -100,7 +100,20 @@ pub struct Summary {
     /// than one password for. Each password became its own login.
     pub conflicting_logins: usize,
     pub otp: OtpCounts,
+    /// Rows with a note whose login already existed; the note was not added.
+    pub notes_not_added: usize,
     pub unverified: Unverified,
+}
+
+impl Summary {
+    /// Whether everything the exports carried reached 1Password: every row
+    /// checked, and no one-time password or note left out.
+    pub fn complete(&self) -> bool {
+        self.unverified.total() == 0
+            && self.otp.not_added == 0
+            && self.otp.ignored.is_empty()
+            && self.notes_not_added == 0
+    }
 }
 
 /// What happened to the one-time-password secrets in Apple's `OTPAuth` column.
@@ -150,7 +163,8 @@ enum Match {
     HostOnly,
 }
 
-/// Index of existing login items keyed by normalized host → (username_lc, id).
+/// Index of existing login items keyed by site key (normalized host, or the
+/// title of a login with no URL) → (username_lc, id).
 struct Index {
     by_host: HashMap<String, Vec<(String, String)>>,
 }
@@ -160,23 +174,24 @@ impl Index {
         let mut by_host: HashMap<String, Vec<(String, String)>> = HashMap::new();
         for it in items {
             let username = it.username().unwrap_or("").to_lowercase();
-            for u in &it.urls {
-                if let Some(host) = host_of(&u.href) {
-                    let entry = by_host.entry(host).or_default();
-                    let pair = (username.clone(), it.id.clone());
-                    if !entry.contains(&pair) {
-                        entry.push(pair);
-                    }
+            let mut keys: Vec<String> = it.urls.iter().filter_map(|u| host_of(&u.href)).collect();
+            if keys.is_empty() {
+                keys.push(site_key_for(None, &it.title));
+            }
+            for key in keys {
+                let entry = by_host.entry(key).or_default();
+                let pair = (username.clone(), it.id.clone());
+                if !entry.contains(&pair) {
+                    entry.push(pair);
                 }
             }
         }
         Index { by_host }
     }
 
-    /// Find an existing item id matching this credential's host+username.
+    /// Find an existing item id matching this credential's site+username.
     fn find(&self, cred: &Credential) -> Option<(String, Match)> {
-        let host = cred.host()?;
-        let candidates = self.by_host.get(&host)?;
+        let candidates = self.by_host.get(&cred.site_key())?;
         let want = cred.username.to_lowercase();
         // Prefer an exact username match on the same host.
         if let Some((_, id)) = candidates.iter().find(|(u, _)| *u == want) {
@@ -190,13 +205,11 @@ impl Index {
         None
     }
 
-    /// Every existing login on this credential's host with its username.
+    /// Every existing login on this credential's site with its username.
     fn exact(&self, cred: &Credential) -> Vec<String> {
-        let (Some(host), want) = (cred.host(), cred.username.to_lowercase()) else {
-            return Vec::new();
-        };
+        let want = cred.username.to_lowercase();
         self.by_host
-            .get(&host)
+            .get(&cred.site_key())
             .map(|c| {
                 c.iter()
                     .filter(|(u, _)| *u == want)
@@ -207,13 +220,26 @@ impl Index {
     }
 }
 
-/// De-duplicate credentials by (host, username), keeping the last occurrence.
+/// De-duplicate credentials by (site, username). The last row wins, but a
+/// field it leaves empty (password, one-time password, note) keeps the
+/// earlier row's value, so a later Chrome row does not drop an Apple row's
+/// code and a passwordless row does not blank a password.
 pub fn dedupe(creds: Vec<Credential>) -> Vec<Credential> {
     let mut seen: HashMap<(String, String), usize> = HashMap::new();
     let mut out: Vec<Credential> = Vec::new();
-    for c in creds {
+    for mut c in creds {
         let key = c.identity();
         if let Some(&idx) = seen.get(&key) {
+            let earlier = &out[idx];
+            if c.password.is_empty() {
+                c.password = earlier.password.clone();
+            }
+            if c.otp.is_none() {
+                c.otp = earlier.otp.clone();
+            }
+            if c.note.is_empty() {
+                c.note = earlier.note.clone();
+            }
             out[idx] = c;
         } else {
             seen.insert(key, out.len());
@@ -223,30 +249,45 @@ pub fn dedupe(creds: Vec<Credential>) -> Vec<Credential> {
     out
 }
 
-/// Keep-all: drop exact repeats (same site, username, password and one-time
-/// password), keeping the first row. A repeat's note, when it differs, is
-/// added to the kept row's note so no text is lost. Returns the rows kept and
-/// the number dropped.
+/// Keep-all: drop exact repeats (same site, username and password), keeping
+/// the first row. A repeat's one-time password fills a kept row that has
+/// none; a different one keeps the repeat as a login of its own. Every
+/// distinct note of the folded rows is kept, in order. Returns the rows kept
+/// and the number dropped.
 pub fn fold_repeats(creds: Vec<Credential>) -> (Vec<Credential>, usize) {
-    let mut seen: HashMap<(String, String, String, String), usize> = HashMap::new();
+    let mut groups: HashMap<(String, String, String), Vec<usize>> = HashMap::new();
     let mut out: Vec<Credential> = Vec::new();
+    let mut notes: Vec<Vec<String>> = Vec::new();
     let mut repeats = 0;
     for c in creds {
-        let key = c.secret_identity();
-        if let Some(&idx) = seen.get(&key) {
-            repeats += 1;
-            let kept = &mut out[idx];
-            if !c.note.is_empty() && !kept.note.split("\n\n").any(|n| n == c.note) {
-                if kept.note.is_empty() {
-                    kept.note = c.note;
-                } else {
-                    kept.note = format!("{}\n\n{}", kept.note, c.note);
+        let group = groups.entry(c.secret_identity()).or_default();
+        let fits = group.iter().copied().find(|&i| {
+            let kept = &out[i].otp;
+            kept.is_none() || c.otp.is_none() || *kept == c.otp
+        });
+        match fits {
+            Some(i) => {
+                repeats += 1;
+                if out[i].otp.is_none() {
+                    out[i].otp = c.otp;
+                }
+                if !c.note.is_empty() && !notes[i].contains(&c.note) {
+                    notes[i].push(c.note);
                 }
             }
-        } else {
-            seen.insert(key, out.len());
-            out.push(c);
+            None => {
+                group.push(out.len());
+                notes.push(if c.note.is_empty() {
+                    Vec::new()
+                } else {
+                    vec![c.note.clone()]
+                });
+                out.push(c);
+            }
         }
+    }
+    for (c, n) in out.iter_mut().zip(notes) {
+        c.note = n.join("\n\n");
     }
     (out, repeats)
 }
@@ -330,15 +371,22 @@ fn tally_unverified(unverified: &mut Unverified, step: &Step) {
     }
 }
 
-/// Count what became of a row's one-time-password secret.
-fn tally_otp(otp: &mut OtpCounts, cred: &Credential, kind: &OutcomeKind) {
-    if cred.otp.is_none() {
-        return;
+/// Count what became of a row's one-time-password secret and note.
+fn tally_extras(summary: &mut Summary, cred: &Credential, kind: &OutcomeKind) {
+    let created = match kind {
+        OutcomeKind::Created | OutcomeKind::Planned("create") => true,
+        OutcomeKind::Failed(_) => return,
+        _ => false,
+    };
+    if cred.otp.is_some() {
+        if created {
+            summary.otp.added += 1;
+        } else {
+            summary.otp.not_added += 1;
+        }
     }
-    match kind {
-        OutcomeKind::Created | OutcomeKind::Planned("create") => otp.added += 1,
-        OutcomeKind::Failed(_) => {}
-        _ => otp.not_added += 1,
+    if !cred.note.is_empty() && !created {
+        summary.notes_not_added += 1;
     }
 }
 
@@ -395,7 +443,7 @@ pub fn run(op: &Op, opts: &Options, creds: Vec<Credential>) -> Result<(Vec<Outco
         if !matches!(kind, OutcomeKind::Failed(_)) {
             tally_unverified(&mut summary.unverified, &step);
         }
-        tally_otp(&mut summary.otp, cred, &kind);
+        tally_extras(&mut summary, cred, &kind);
         outcomes.push(Outcome {
             origin: cred.origin,
             title: cred.title.clone(),
@@ -581,6 +629,7 @@ mod tests {
     fn login(id: &str, host: &str, user: &str) -> OpItem {
         OpItem {
             id: id.into(),
+            title: String::new(),
             additional_information: Some(user.into()),
             urls: vec![OpUrl {
                 href: format!("https://{host}"),
@@ -732,11 +781,58 @@ mod tests {
     }
 
     #[test]
-    fn a_different_one_time_password_is_not_a_repeat() {
+    fn a_missing_one_time_password_folds_and_a_different_one_does_not() {
+        let with = |otp: &str| {
+            let mut c = cred("x.com", "u", "pw");
+            c.otp = Some(otp.into());
+            c
+        };
+        let (out, repeats) = fold_repeats(vec![
+            cred("x.com", "u", "pw"),
+            with("otpauth://totp/a?secret=AAAA"),
+            with("otpauth://totp/b?secret=BBBB"),
+        ]);
+        assert_eq!((out.len(), repeats), (2, 1));
+        assert_eq!(out[0].otp.as_deref(), Some("otpauth://totp/a?secret=AAAA"));
+        assert_eq!(out[1].otp.as_deref(), Some("otpauth://totp/b?secret=BBBB"));
+    }
+
+    #[test]
+    fn a_repeated_note_with_a_blank_line_is_kept_once() {
         let mut a = cred("x.com", "u", "pw");
-        a.otp = Some("otpauth://totp/a?secret=AAAA".into());
-        let b = cred("x.com", "u", "pw");
-        let (out, repeats) = fold_repeats(vec![a, b]);
+        a.note = "first\n\nsecond".into();
+        let b = a.clone();
+        let (out, _) = fold_repeats(vec![a, b]);
+        assert_eq!(out[0].note, "first\n\nsecond");
+    }
+
+    #[test]
+    fn dedupe_fills_what_the_later_row_lacks() {
+        let mut apple = cred("x.com", "u", "pw");
+        apple.otp = Some("otpauth://totp/a?secret=AAAA".into());
+        apple.note = "n".into();
+        let chrome = cred("x.com", "u", "");
+        let out = dedupe(vec![apple, chrome]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].password, "pw");
+        assert!(out[0].otp.is_some());
+        assert_eq!(out[0].note, "n");
+    }
+
+    #[test]
+    fn a_row_with_no_url_matches_a_vault_login_with_no_url_by_title() {
+        let mut item = login("id1", "unused", "admin");
+        item.urls.clear();
+        item.title = "Router".into();
+        let index = Index::build(&[item]);
+        let mut c = cred("unused", "admin", "pw");
+        c.url.clear();
+        c.title = "router".into();
+        assert_eq!(index.exact(&c), vec!["id1".to_string()]);
+        let mut other = c.clone();
+        other.title = "NAS".into();
+        assert!(index.exact(&other).is_empty());
+        let (out, repeats) = fold_repeats(vec![c, other]);
         assert_eq!((out.len(), repeats), (2, 0));
     }
 

@@ -9,8 +9,9 @@ into 1Password via the `op` CLI. Single binary crate. This file orients contribu
   each line goes to.
 - `cli.rs` — clap-derive command/flags.
 - `source.rs` — parse an export CSV. The header decides the `Format`:
-  `name,url,username,password,note` is Chrome, `Title,URL,Username,Password,
-  Notes,OTPAuth` is Apple; anything else is refused before `op` runs, and the
+  `url,username,password` with no `title` (`name`, `note` optional) is
+  Chrome, `Title,URL,Username,Password,Notes,OTPAuth` is Apple; anything
+  else, both `name` and `title` included, is refused before `op` runs, and the
   error never repeats the header (a headerless file has a credential there).
   Columns are located by **header name** (case-insensitive), so column order
   and short rows are tolerated. Each row keeps its number (header = row 1).
@@ -95,29 +96,40 @@ family error shape.
 `sync` takes one or more CSVs, read and validated before `preflight`. Their
 rows go through one `sync::run`; a failed row keeps every export.
 
-- **Upsert** (`Mode::Upsert`, default): `dedupe` by host + username, last row
-  wins, across files.
+- **Upsert** (`Mode::Upsert`, default): `dedupe` by site key + username, last
+  row wins, across files; a password, OTP or note it lacks comes from the
+  earlier row.
+- **Site key** (`Credential::site_key`, `credential::site_key_for`): the
+  normalized host, or `title:<lowercased title>` for a row or vault login with
+  no URL, so URL-less logins match by title.
 - **Keep-all** (`Mode::KeepAll`, `--keep-all`, conflicts with `--update`):
-  `fold_repeats` drops exact repeats of (host, lowercased username, password,
-  OTP secret), keeping the first and appending a repeat's different note.
+  `fold_repeats` drops repeats of (site key, lowercased username, password),
+  keeping the first.
   `plan` gives `CreateUnlessHeld` with every exact host + username login;
   `PasswordCache` reveals each candidate once and the row is `unchanged` when
   one holds the same password, created otherwise. Host-only matching does not
-  apply. Keep-all never edits and leaves nothing unverified; it reports
-  `repeats` and `conflicting_logins`.
+  apply. Keep-all never edits; the only rows it can leave unverified are
+  `unreadable` ones. It reports `repeats` and `conflicting_logins`. A repeat
+  without an OTP folds into a kept row of the same key (taking its secret if
+  the kept row has none); a different OTP stays a login of its own. Distinct
+  notes are kept per row and joined once.
 - **Tags** (`--tag`, repeatable, no commas) go to `op item create --tags` on
   argv: tags are not secret.
 - **OTP**: `summary.otp` counts secrets added, carried by a row whose login
   exists (`not_added`), and `OTPAuth` values that are not `otpauth://`
-  (`ignored`, by row).
+  (`ignored`, by row); `notes_not_added` counts notes of rows whose login
+  exists. `Summary::complete` (all of these zero and nothing unverified) is
+  the only case in which the deletion line says 1Password holds everything.
 
 ## Passkeys and `--update`
 
 `op item edit --help` (2.42.0): a JSON template update overwrites a passkey on
-the item. `update_password` therefore refuses to edit an item whose revealed
-JSON has a key or field type naming a passkey (`has_passkey`); the row fails
-with a message. The exact JSON shape of a passkey in `op item get` is
-unverified, so the check errs towards yes. Passkeys themselves move only by
+the item. 1Password documents no passkey field in `op item get` JSON, and a
+user report says `op` shows none, so a passkey cannot be detected reliably.
+Hence `--update` needs `--force` outside a dry run (`Error::Confirm`, exit 6,
+checked before `op` runs). `update_password` also refuses an item whose
+revealed JSON has a key or field type naming a passkey (`has_passkey`, the
+shape the desktop app's JSON uses), and that row fails. Passkeys themselves move only by
 Apple's Credential Exchange on iPhone/iPad (README, Passkeys).
 
 ## Matching & idempotency

@@ -7,6 +7,7 @@
 #   FAKE_OP_ITEM_LIST  which `op item list` answer to give (default item-list.json)
 #   FAKE_OP_ITEM_GET   which `op item get` answer to give (default
 #                      item-get-revealed.json)
+#   FAKE_OP_ITEM_GET_FAIL  when set, `op item get` fails
 #   FAKE_OP_LOG        file each call's argv is appended to, one line per call
 #   FAKE_OP_EDIT_FAIL  when set, `op item edit` fails after recording its template
 #   FAKE_OP_EDIT_SIGNAL  when set (INT, TERM, ...), `op item edit` sends that
@@ -47,6 +48,10 @@ case "${1:-} ${2:-}" in
 	cat "$FAKE_OP_DIR/item-create.json"
 	;;
 "item get")
+	if [ -n "${FAKE_OP_ITEM_GET_FAIL:-}" ]; then
+		echo "[ERROR] 2026/01/01 00:00:00 the test refuses this read" >&2
+		exit 1
+	fi
 	cat "$FAKE_OP_DIR/${FAKE_OP_ITEM_GET:-item-get-revealed.json}"
 	;;
 "item edit")

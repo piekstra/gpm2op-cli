@@ -56,7 +56,8 @@ cargo install --path .        # installs the `gpm2op` binary
 - **Web:** [passwords.google.com](https://passwords.google.com) → Settings →
   **Export passwords**.
 
-The CSV's header is `name,url,username,password,note`.
+The CSV's header is `name,url,username,password,note`. A file with only
+`url,username,password` (the columns Google documents) is read the same way.
 
 ### From Apple Passwords / Safari
 
@@ -76,7 +77,8 @@ Sign in with Apple accounts.
 
 `gpm2op` tells the two formats apart by the header and says which it found
 (`Read … (Apple Passwords / Safari)`, and `summary.format` in `--json`). A file
-whose header is neither is refused (exit 2) before `op` is called, and the
+whose header is neither, or has both `name` and `title`, is refused (exit 2)
+before `op` is called, and the
 error does not repeat the header, since a file without one has a password in
 its first line.
 
@@ -87,7 +89,7 @@ its first line.
 | `username` / `Username` | the username |
 | `password` / `Password` | the password; a row with none (Chrome writes these for a sign-in through another site) is imported without a password field |
 | `note` / `Notes` | the notes |
-| `OTPAuth` | a one-time password field, when the value is an `otpauth://` address; any other value is not imported, and stderr names its row |
+| `OTPAuth` | a one-time password field, when the value is an `otpauth://` address; any other value is not imported: a real run names its row on stderr, and `--json` lists it in `summary.otp.ignored_rows` |
 
 **Every export is plain text.** `gpm2op sync` deletes the files it read once a
 run finishes with no failed rows (see [Security](#security)). It cannot delete
@@ -99,7 +101,7 @@ copies elsewhere: see [After the import](#after-the-import).
 gpm2op check                                   # confirm op is signed in + vault
 gpm2op sync passwords.csv --dry-run            # preview: what would change
 gpm2op sync passwords.csv                      # create missing logins
-gpm2op sync passwords.csv --update             # also fix changed passwords
+gpm2op sync passwords.csv --update --force     # also fix changed passwords (see Passkeys)
 gpm2op sync passwords.csv --vault "Personal"   # choose a vault (default: Private)
 gpm2op sync passwords.csv --keep-csv           # leave the export on disk afterwards
 gpm2op sync Passwords.csv "Google Passwords.csv" --keep-all --tag import-2026-11
@@ -115,23 +117,37 @@ gpm2op self-update                             # update the binary in place
   untouched and reported as `unchanged`). It updates only a login matched on
   host **and** username: a row with no username that matches the only login on
   its site by host alone may be another account's, so that login is left
-  untouched and the row is counted under `host_only`.
+  untouched and the row is counted under `host_only`. Outside `--dry-run` it
+  needs **`--force`** (exit 6 without it, before `op` is called): `op` edits a
+  login by replacing it from a JSON template, which overwrites a passkey
+  stored on it, and `op`'s item JSON does not reliably show one. Pass
+  `--force` once the logins it would change hold no passkey you need, or
+  before passkeys are moved into 1Password; `--dry-run --update` lists them.
+  `gpm2op` still refuses to edit a login whose JSON does show a passkey, and
+  that row fails.
 - **`--dry-run`:** print the plan without writing anything. The export is kept.
 - **Several exports in one run:** `sync` takes one or more CSVs, of either
   format. Their rows are matched together, so in the default mode the last row
-  for a site and username wins across all of them. A failed row keeps every
-  export of the run for the rerun.
+  for a site and username wins across all of them; a password, one-time
+  password or note the winning row lacks is taken from the earlier row. A
+  failed row keeps every export of the run for the rerun. Name each export
+  once: the same file given twice (by any path that resolves to it) is refused
+  with exit 2 before `op` is called.
 - **`--keep-all`:** for exports that disagree when nobody knows which password
   is current. Every distinct site, username and password becomes its own
-  login. A row that repeats an earlier one exactly (site, username, password
-  and one-time password), in the same file or another, is imported once, and
-  a different note on the repeat is added to the kept row's. A login already
+  login. A row that repeats an earlier one (same site, username and
+  password), in the same file or another, is imported once: its one-time
+  password fills in a kept row that has none, and its note, when different,
+  is added to the kept row's. A repeat with a different one-time password
+  becomes a login of its own. A login already
   in the vault with the same site, username and password is not created again:
   keep-all reads the password of each existing login on the same site and
   username to compare. It never changes an existing login, and it cannot be
-  combined with `--update`. stderr says how many site and username pairs came
-  with more than one password; sign in with each to find the current one,
-  then delete the others.
+  combined with `--update`. A real run says on stderr how many site and
+  username pairs came with more than one password (`summary.conflicting_logins`
+  in `--json`); sign in with each to find the current one, then delete the
+  others. A password that was already in 1Password is left as it was, without
+  the run's tag, so search by site and username to see every candidate.
 - **`--tag TAG`:** tags every login the run creates (repeat the flag for more
   than one tag; a tag cannot contain a comma). Tag an import so it can be
   found and undone:
@@ -145,8 +161,8 @@ gpm2op self-update                             # update the binary in place
   reference describes. Look at the list before deleting.
 - **The export is deleted** after a sync in which no row failed, including one
   that created nothing because every row matched an existing login. The export
-  is a copy: Google Password Manager still holds every password in it, so
-  deleting it loses nothing. When a row fails, the export is kept and stderr
+  is a copy: Google Password Manager or Apple Passwords still holds every
+  password in it, so deleting it loses nothing. When a row fails, the export is kept and stderr
   says so; fix the cause and rerun, and the clean rerun deletes it.
 - **`--keep-csv`** keeps the export. A script that syncs the same file more
   than once (a second vault, a later `--update`) passes it on every run but the
@@ -158,17 +174,20 @@ gpm2op self-update                             # update the binary in place
   of a later row's site and username, and a row with no URL and no username
   (not synced at all, named by row number) are each counted, and named on
   stderr in human mode. Notes name rows by number, never by site, username or
-  password. Before removing anything from Google Password Manager or Apple
-  Passwords,
-  export again and run `--update` to reconcile the first group, and check the
-  `host_only` logins in 1Password by hand.
+  password. A one-time password or note that did not reach 1Password (its row
+  matched a login that already exists) is counted too (`summary.otp.not_added`,
+  `summary.notes_not_added`). The deletion line says 1Password holds every
+  credential only when none of these happened. Before removing anything from
+  Google Password Manager or Apple Passwords, export again and run
+  `--update --force` to reconcile the first group, and check the `host_only`
+  logins in 1Password by hand.
 - **Output streams:** results are on stdout; progress (`Read N credential(s)
   …`) and notes are on stderr, in every mode.
 - **`--json`:** stdout carries exactly one JSON document. `sync` gives
   `sync-result/v1`: `summary` with `format` (`chrome`, `apple` or `mixed`),
   `mode` (`upsert` or `keep-all`), `tags`, the counts, `repeats` and
   `conflicting_logins` (keep-all), `otp` (`added`, `not_added`,
-  `ignored_rows`), `csv_deleted` (every export deleted), `sources` (each
+  `ignored_rows`), `notes_not_added`, `csv_deleted` (every export deleted), `sources` (each
   export's `path`, `format`, `rows`, `unreadable_rows` and `deleted`), and
   `unverified` (`not_compared`, `host_only`, `deduped`, `unreadable`), then
   `items`, each with its `file` (position among the exports, from 0) and `row`
@@ -181,16 +200,14 @@ gpm2op self-update                             # update the binary in place
 A CSV row is considered "already in 1Password" when an existing **Login** item
 in the target vault shares the same **host** (normalized: lowercased, `www.`
 stripped) and **username** (case-insensitive). Different usernames on the same
-site are treated as separate logins. CSV rows are de-duplicated by
-(host, username), keeping the last occurrence. The upshot: **running twice makes
+site are treated as separate logins. A row with no URL matches a login with no
+URL by its title (case-insensitive) instead of the host. CSV rows are
+de-duplicated by (host, username), keeping the last occurrence. The upshot: **running twice makes
 no second-run changes.** `--keep-all` matches on host, username **and**
 password instead, so it too makes no changes the second time.
 
-`--update` never edits a login that holds a passkey: `op` replaces the whole
-item from a JSON template, and its help says a passkey on the item is
-overwritten. That row fails with a message saying so; change that password in
-the 1Password app. The default mode and `--keep-all` never edit an existing
-login.
+The default mode and `--keep-all` never edit an existing login; only
+`--update --force` does (see its bullet above).
 
 ## Passkeys
 
@@ -223,8 +240,11 @@ are not exported.
 - **From Google Password Manager:** there is no transfer. Add a passkey in
   1Password on each site that offers one (the site's security settings →
   create a passkey, with 1Password as the passkey provider).
-- **Passkeys and `--update`:** `--update` never edits a login that holds a
-  passkey (see above), so the transfer and `gpm2op` can run in either order.
+- **Passkeys and `--update`:** a template edit overwrites a passkey on the
+  login, and `op` does not reliably show one. Run any `--update --force`
+  before the passkey transfer; afterwards, change a password in the 1Password
+  app instead. The default mode and `--keep-all` never edit a login, so they
+  are safe in either order.
 
 ## After the import
 
@@ -238,7 +258,9 @@ are not exported.
 2. **Keep Apple Passwords or Google Password Manager** until 1Password has
    been in use for a while; they are what the deleted export was a copy of.
 3. With `--keep-all`, sign in with each conflicting login, keep the one that
-   works, and delete the others (`op item list --tags …` finds them).
+   works, and delete the others. `op item list --tags …` finds the logins the
+   run created; one that was already in 1Password has no tag, so search by
+   site and username too.
 
 ## Security
 

@@ -413,7 +413,7 @@ fn update_never_overwrites_a_login_matched_on_host_alone() {
     // same host, for jane@example.com, which may be another account.
     let t = Scratch::new();
     let export = t.export("google-passwords-export-empty-username.csv");
-    let out = t.run(&["sync", s(&export), "--update"]);
+    let out = t.run(&["sync", s(&export), "--update", "--force"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let log = t.log();
     assert!(!log.contains("item edit"), "an edit was issued:\n{log}");
@@ -427,7 +427,7 @@ fn update_never_overwrites_a_login_matched_on_host_alone() {
     );
 
     let export = t.export("google-passwords-export-empty-username.csv");
-    let doc = one_json_document(&t.run(&["--json", "sync", s(&export), "--update"]));
+    let doc = one_json_document(&t.run(&["--json", "sync", s(&export), "--update", "--force"]));
     assert_eq!(doc["summary"]["updated"], 0);
     assert_eq!(doc["summary"]["unverified"]["host_only"], 1);
     assert_eq!(doc["items"][0]["result"], "exists");
@@ -438,7 +438,7 @@ fn update_never_overwrites_a_login_matched_on_host_alone() {
 fn update_hands_op_a_0600_template_and_removes_it() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
-    let out = t.run(&["sync", s(&export), "--update"]);
+    let out = t.run(&["sync", s(&export), "--update", "--force"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(stdout(&out).contains("1 updated"), "{}", stdout(&out));
     let templates = templates(&t.log());
@@ -458,7 +458,7 @@ fn a_rejected_edit_timeout_warns_once_and_uses_the_default() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
     let out = t
-        .command(&["sync", s(&export), "--update"])
+        .command(&["sync", s(&export), "--update", "--force"])
         .env("GPM2OP_EDIT_TIMEOUT", "2m")
         .output()
         .unwrap();
@@ -472,7 +472,7 @@ fn update_removes_its_template_when_op_edit_fails() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
     let out = t
-        .command(&["sync", s(&export), "--update"])
+        .command(&["sync", s(&export), "--update", "--force"])
         .env("FAKE_OP_EDIT_FAIL", "1")
         .output()
         .unwrap();
@@ -493,7 +493,7 @@ fn update_removes_its_template_when_interrupted_mid_edit() {
         let t = Scratch::new();
         let export = t.export("google-passwords-export.csv");
         let out = t
-            .command(&["sync", s(&export), "--update"])
+            .command(&["sync", s(&export), "--update", "--force"])
             .env("FAKE_OP_EDIT_SIGNAL", signal)
             .output()
             .unwrap();
@@ -541,7 +541,7 @@ fn a_sigterm_to_gpm2op_alone_reaches_op_and_removes_the_template() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
     let mut child = t
-        .command(&["sync", s(&export), "--update"])
+        .command(&["sync", s(&export), "--update", "--force"])
         .env("FAKE_OP_EDIT_SLEEP", "30")
         .stdout(Stdio::null())
         .stderr(Stdio::null())
@@ -582,7 +582,7 @@ fn an_edit_that_never_finishes_is_stopped_and_fails_its_row() {
     let export = t.export("google-passwords-export.csv");
     let started = Instant::now();
     let out = t
-        .command(&["--json", "sync", s(&export), "--update"])
+        .command(&["--json", "sync", s(&export), "--update", "--force"])
         .env("FAKE_OP_EDIT_SLEEP", "30")
         .env("GPM2OP_EDIT_TIMEOUT", "1")
         .output()
@@ -619,7 +619,7 @@ fn an_edit_that_never_finishes_is_stopped_and_fails_its_row() {
 fn no_password_reaches_op_argv() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
-    let out = t.run(&["sync", s(&export), "--update"]);
+    let out = t.run(&["sync", s(&export), "--update", "--force"]);
     assert!(out.status.success(), "{}", stderr(&out));
     let log = t.log();
     assert!(log.contains("item create"), "{log}");
@@ -729,14 +729,21 @@ fn a_row_with_no_password_is_created_and_never_blanks_a_stored_one() {
 
     // The same row against a vault that has the login: --update leaves it.
     let export = t.export("google-passwords-export-empty-password.csv");
-    let out = t.run(&["sync", s(&export), "--update"]);
+    let out = t.run(&["sync", s(&export), "--update", "--force"]);
     assert!(out.status.success(), "{}", stderr(&out));
     assert!(!t.log().contains("item edit"), "{}", t.log());
     assert!(!t.log().contains("item get"), "{}", t.log());
     assert!(stdout(&out).contains("1 left as-is"), "{}", stdout(&out));
-    // Nothing to compare, so nothing is unverified.
+    // Nothing to compare, so nothing is unverified, but the row's note did
+    // not reach the existing login.
+    assert!(!stderr(&out).contains("not compared"), "{}", stderr(&out));
     assert!(
-        stdout(&out).contains("every credential read from it is in 1Password now"),
+        stderr(&out).contains("1 row(s) had a note for a login that already exists"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        !stdout(&out).contains("is in 1Password now"),
         "{}",
         stdout(&out)
     );
@@ -857,7 +864,7 @@ fn bad_arguments_are_refused_before_op_runs() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
     for args in [
-        vec!["sync", s(&export), "--keep-all", "--update"],
+        vec!["sync", s(&export), "--keep-all", "--update", "--force"],
         vec!["sync", s(&export), "--tag", "a,b"],
         vec!["sync", s(&export), "--tag", " "],
         vec!["sync", s(&export), s(&export)],
@@ -877,7 +884,7 @@ fn update_never_edits_a_login_that_holds_a_passkey() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
     let out = t
-        .command(&["--json", "sync", s(&export), "--update"])
+        .command(&["--json", "sync", s(&export), "--update", "--force"])
         .env("FAKE_OP_ITEM_GET", "item-get-revealed-passkey.json")
         .output()
         .unwrap();
@@ -890,4 +897,112 @@ fn update_never_edits_a_login_that_holds_a_passkey() {
         .contains("holds a passkey"));
     assert!(!t.log().contains("item edit"), "{}", t.log());
     assert!(export.exists());
+}
+
+#[test]
+fn update_needs_force_outside_a_dry_run() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t.run(&["sync", s(&export), "--update"]);
+    assert_eq!(out.status.code(), Some(6), "{}", stderr(&out));
+    assert!(stderr(&out).contains("passkey"), "{}", stderr(&out));
+    assert!(t.log().is_empty(), "op was called:\n{}", t.log());
+    assert!(export.exists());
+    let doc = one_json_document(&t.run(&["--json", "sync", s(&export), "--update"]));
+    assert_eq!(doc["error"]["code"], "confirmation_required");
+
+    let out = t.run(&["sync", s(&export), "--update", "--dry-run"]);
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert!(stdout(&out).contains("would update"), "{}", stdout(&out));
+}
+
+#[test]
+fn keep_all_fails_a_row_whose_comparison_read_fails_and_keeps_every_export() {
+    for dry_run in [false, true] {
+        let t = Scratch::new();
+        let chrome = t.export("google-passwords-export-keep-all.csv");
+        let apple = t.export_as("apple-passwords-export-keep-all.csv", "Passwords.csv");
+        let mut args = vec!["--json", "sync", s(&chrome), s(&apple), "--keep-all"];
+        if dry_run {
+            args.push("--dry-run");
+        }
+        let out = t
+            .command(&args)
+            .env("FAKE_OP_ITEM_GET_FAIL", "1")
+            .output()
+            .unwrap();
+        assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+        let doc = one_json_document(&out);
+        // Both example.com passwords need the vault login's password read.
+        assert_eq!(doc["summary"]["failed"], 2, "{doc}");
+        assert_eq!(doc["summary"]["unchanged"], 0);
+        let created = t.created();
+        assert!(
+            created.iter().all(|i| i["title"] != "Example"),
+            "an unread example.com row was created: {created:?}"
+        );
+        assert!(chrome.exists() && apple.exists(), "dry_run={dry_run}");
+    }
+}
+
+#[test]
+fn default_mode_keeps_an_earlier_rows_code_password_and_note() {
+    // An Apple row with a code and a note, then a Chrome row for the same
+    // site and username with neither, and no password.
+    let t = Scratch::new();
+    let apple = t.export_as("apple-passwords-export.csv", "Passwords.csv");
+    let chrome = t.export("google-passwords-export-same-login-as-apple.csv");
+    let out = t
+        .command(&["--json", "sync", s(&apple), s(&chrome)])
+        .env("FAKE_OP_ITEM_LIST", "item-list-empty.json")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let created = t.created();
+    let org = created
+        .iter()
+        .find(|i| i["urls"][0]["href"] == "https://www.example.org/")
+        .unwrap();
+    let fields = org["fields"].as_array().unwrap();
+    let value =
+        |pred: &dyn Fn(&Value) -> bool| fields.iter().find(|f| pred(f)).map(|f| f["value"].clone());
+    assert_eq!(
+        value(&|f| f["purpose"] == "PASSWORD"),
+        Some(Value::from("fixture-password-2"))
+    );
+    assert!(value(&|f| f["type"] == "OTP").is_some(), "{org}");
+    assert_eq!(
+        value(&|f| f["purpose"] == "NOTES"),
+        Some(Value::from("an apple note"))
+    );
+    assert_eq!(org["title"], "Example Org");
+}
+
+#[test]
+fn a_code_that_did_not_reach_1password_stops_the_complete_claim() {
+    // The vault already holds example.org's password; under keep-all the row
+    // is unchanged, so its code and note are not added.
+    let t = Scratch::new();
+    let apple = t.export_as("apple-passwords-export.csv", "Passwords.csv");
+    let out = t
+        .command(&["sync", s(&apple), "--keep-all"])
+        .env("FAKE_OP_ITEM_LIST", "item-list-whole-export.json")
+        .env("FAKE_OP_ITEM_GET", "item-get-revealed-example-org.json")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(
+        err.contains("one-time-password secret for a login that already exists"),
+        "{err}"
+    );
+    assert!(
+        err.contains("had a note for a login that already exists"),
+        "{err}"
+    );
+    assert!(
+        !stdout(&out).contains("is in 1Password now"),
+        "{}",
+        stdout(&out)
+    );
 }

@@ -58,14 +58,23 @@ pub struct SyncArgs {
     /// Also update the stored password when an existing login's password
     /// differs from the CSV (default: leave existing logins untouched). Rows
     /// with no username that match a login on host alone are never updated.
+    /// Needs --force outside a dry run: op's template edit overwrites a
+    /// passkey stored on the login.
     #[arg(long, conflicts_with = "keep_all")]
     pub update: bool,
 
+    /// Let --update edit existing logins, accepting that op's template edit
+    /// overwrites a passkey stored on one. gpm2op still refuses a login whose
+    /// item JSON shows a passkey, but op does not reliably show one.
+    #[arg(long, requires = "update")]
+    pub force: bool,
+
     /// Create a login for every distinct site, username and password, for
-    /// exports that disagree about which password is current. Exact repeats
-    /// across the files of the run are imported once, and a login already in
-    /// the vault with the same site, username and password is not created
-    /// again (its password is read to compare). Nothing existing is changed.
+    /// exports that disagree about which password is current. Repeats across
+    /// the files of the run are imported once (a different one-time password
+    /// keeps a repeat as its own login), and a login already in the vault
+    /// with the same site, username and password is not created again (its
+    /// password is read to compare). Nothing existing is changed.
     /// Without it, one login per site and username, the last row winning.
     #[arg(long)]
     pub keep_all: bool,

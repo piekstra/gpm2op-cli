@@ -18,6 +18,9 @@ use std::time::{Duration, Instant};
 #[derive(Debug, Clone, Deserialize)]
 pub struct OpItem {
     pub id: String,
+    /// Matched on for a login with no URL.
+    #[serde(default)]
+    pub title: String,
     /// For logins this is typically the username (from `op item list`).
     #[serde(default)]
     pub additional_information: Option<String>,
