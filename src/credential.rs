@@ -28,6 +28,9 @@ pub struct Credential {
     pub otp: Option<String>,
 }
 
+/// The title given to a row with neither a URL nor a title.
+pub const UNTITLED: &str = "Untitled Login";
+
 /// Whether an `OTPAuth` value is one 1Password can store as a one-time
 /// password.
 pub fn is_otpauth(raw: &str) -> bool {
@@ -44,7 +47,7 @@ impl Credential {
         let title = if titled {
             r.name.trim().to_string()
         } else {
-            host_of(&url).unwrap_or_else(|| "Untitled Login".to_string())
+            host_of(&url).unwrap_or_else(|| UNTITLED.to_string())
         };
         let otp = r.otp.trim();
         Credential {
@@ -68,6 +71,11 @@ impl Credential {
     /// no URL, its lowercased title (`site_key_for`). A row with neither a URL
     /// nor a title from the export gets a key of its own, `row:<file>:<row>`,
     /// so a made-up "Untitled Login" never matches anything.
+    /// A row with neither a URL nor a title from the export.
+    pub fn is_untitled(&self) -> bool {
+        self.host().is_none() && !self.titled
+    }
+
     pub fn site_key(&self) -> String {
         match self.host() {
             None if !self.titled => format!("row:{}:{}", self.origin.file, self.origin.row),

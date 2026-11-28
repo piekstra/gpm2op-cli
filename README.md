@@ -182,7 +182,7 @@ gpm2op self-update                             # update the binary in place
   credential only when none of these happened. Before removing anything from
   Google Password Manager or Apple Passwords, export again and run
   `--update --force` to reconcile the first group, and check the `host_only`
-  logins in 1Password by hand.
+  and `title_only` logins in 1Password by hand.
 - **Output streams:** results are on stdout; progress (`Read N credential(s)
   …`) and notes are on stderr, in every mode.
 - **`--json`:** stdout carries exactly one JSON document. `sync` gives
@@ -206,8 +206,10 @@ stripped) and **username** (case-insensitive). Different usernames on the same
 site are treated as separate logins. A row with no URL matches a login with no
 URL by its title (case-insensitive) instead of the host. A title is a label,
 not a site, so such a match is never updated, `--update` included: it is left
-as-is and counted under `title_only`. A row with neither a URL nor a title
-never matches anything. CSV rows are
+as-is and counted under `title_only`. A row with neither a URL nor a title is
+created as "Untitled Login"; a rerun compares it, by password only, with the
+URL-less "Untitled Login" logins of the same username, skips it when one holds
+the same password, and never updates one. CSV rows are
 de-duplicated by (host, username), keeping the last occurrence. The upshot: **running twice makes
 no second-run changes.** `--keep-all` matches on host, username **and**
 password instead, so it too makes no changes the second time.

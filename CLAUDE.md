@@ -145,8 +145,10 @@ Apple's Credential Exchange on iPhone/iPad (README, Passkeys).
   is `Match::Title`: like host-only, `plan` always skips it, even under
   `--update` (titles are labels, not sites), and it counts under
   `Unverified::title_only`. A row with no URL and no title from the export
-  gets the key `row:<file>:<row>`, so the made-up "Untitled Login" title never
-  matches. Same host + different
+  (`Credential::is_untitled`) gets the key `row:<file>:<row>`, so it never
+  matches as a site; `plan` gives it `CreateUnlessHeld` against the URL-less
+  `UNTITLED` logins with its username, in every mode, so a rerun adds nothing
+  and nothing is updated. Same host + different
   username ⇒ a new login. Empty CSV username with exactly one login on the host
   ⇒ a host-only match (avoids dupes). That login may be another account's, so
   `plan` always skips it, even under `--update`, and it counts under

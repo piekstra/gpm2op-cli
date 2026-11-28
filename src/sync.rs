@@ -3,7 +3,7 @@
 //! passwords). Keep-all mode instead creates a login for every distinct site,
 //! username and password, so conflicting exports lose nothing.
 
-use crate::credential::{host_of, site_key_for, Credential, Origin};
+use crate::credential::{host_of, site_key_for, Credential, Origin, UNTITLED};
 use crate::error::{Error, Result};
 use crate::op::{Op, OpItem};
 use std::collections::{HashMap, HashSet};
@@ -218,11 +218,19 @@ impl Index {
         None
     }
 
-    /// Every existing login on this credential's site with its username.
+    /// Every existing login on this credential's site with its username. For
+    /// a row with neither a URL nor a title, the URL-less logins titled like
+    /// the ones gpm2op creates for such rows; these are only ever compared by
+    /// password, never updated.
     fn exact(&self, cred: &Credential) -> Vec<String> {
         let want = cred.username.to_lowercase();
+        let key = if cred.is_untitled() {
+            site_key_for(None, UNTITLED)
+        } else {
+            cred.site_key()
+        };
         self.by_host
-            .get(&cred.site_key())
+            .get(&key)
             .map(|c| {
                 c.iter()
                     .filter(|(u, _)| *u == want)
@@ -337,6 +345,17 @@ fn plan(creds: &[Credential], index: &Index, mode: Mode) -> Vec<Step> {
                         (Action::Create, None)
                     } else {
                         (Action::CreateUnlessHeld { candidates }, Some(Match::Exact))
+                    }
+                }
+                // A row with neither a URL nor a title has no identity to match
+                // on; it is created unless a login like the one an earlier run
+                // made for it holds the same password, so reruns add nothing.
+                Mode::Upsert(_) if c.is_untitled() => {
+                    let candidates = index.exact(c);
+                    if candidates.is_empty() {
+                        (Action::Create, None)
+                    } else {
+                        (Action::CreateUnlessHeld { candidates }, None)
                     }
                 }
                 Mode::Upsert(on_conflict) => {
@@ -833,6 +852,38 @@ mod tests {
         assert_eq!(out[0].password, "pw");
         assert!(out[0].otp.is_some());
         assert_eq!(out[0].note, "n");
+    }
+
+    #[test]
+    fn an_untitled_row_is_compared_by_password_and_never_updated() {
+        let mut made = login("id1", "unused", "admin");
+        made.urls.clear();
+        made.title = UNTITLED.into();
+        let index = Index::build(&[made]);
+        let c = Credential::from_row(
+            0,
+            crate::source::CsvRow {
+                row: 2,
+                username: "admin".into(),
+                password: "pw".into(),
+                ..Default::default()
+            },
+        );
+        for mode in [
+            Mode::Upsert(OnConflict::Skip),
+            Mode::Upsert(OnConflict::Update),
+            Mode::KeepAll,
+        ] {
+            let planned = plan(std::slice::from_ref(&c), &index, mode);
+            assert_eq!(
+                planned[0].action,
+                Action::CreateUnlessHeld {
+                    candidates: vec!["id1".into()]
+                },
+                "{mode:?}"
+            );
+        }
+        assert!(index.find(&c).is_none());
     }
 
     #[test]

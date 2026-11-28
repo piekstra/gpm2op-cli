@@ -57,7 +57,8 @@ pub struct SyncArgs {
 
     /// Also update the stored password when an existing login's password
     /// differs from the CSV (default: leave existing logins untouched). Rows
-    /// with no username that match a login on host alone are never updated.
+    /// matched on host alone (no username) or on title alone (no URL) are
+    /// never updated.
     /// Needs --force outside a dry run: op's template edit overwrites a
     /// passkey stored on the login.
     #[arg(long, conflicts_with = "keep_all")]

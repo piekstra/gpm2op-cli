@@ -404,20 +404,23 @@ mod tests {
             unverified: Unverified {
                 not_compared: 3,
                 host_only: 2,
-                title_only: 0,
+                title_only: 5,
                 deduped: 1,
                 unreadable: 4,
             },
             ..Summary::default()
         };
         let notes = notes(&summary, &run(&chrome));
-        assert_eq!(notes.len(), 4);
+        assert_eq!(notes.len(), 5);
         assert!(notes[0].starts_with("3 row(s) matched an existing login and were not compared"));
         assert!(notes[0].contains("--update --force reconciles them"));
         assert!(notes[0].contains("still in Google Password Manager"));
         assert!(notes[1].starts_with("2 row(s) had no username"));
-        assert!(notes[2].starts_with("1 row(s) repeated a later row's"));
-        assert!(notes[3].starts_with("4 row(s) had no URL and no username"));
+        assert!(
+            notes[2].starts_with("5 row(s) had no URL and matched a login with no URL on title")
+        );
+        assert!(notes[3].starts_with("1 row(s) repeated a later row's"));
+        assert!(notes[4].starts_with("4 row(s) had no URL and no username"));
     }
 
     #[test]
@@ -513,6 +516,13 @@ mod tests {
             },
             Summary {
                 notes_not_added: 1,
+                ..Summary::default()
+            },
+            Summary {
+                unverified: Unverified {
+                    title_only: 1,
+                    ..Unverified::default()
+                },
                 ..Summary::default()
             },
         ];

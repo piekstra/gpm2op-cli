@@ -1006,3 +1006,32 @@ fn a_code_that_did_not_reach_1password_stops_the_complete_claim() {
         stdout(&out)
     );
 }
+
+#[test]
+fn a_row_with_no_url_and_no_title_is_not_created_twice() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export-untitled.csv");
+    let out = t
+        .command(&["--json", "sync", s(&export), "--update", "--force"])
+        .env("FAKE_OP_ITEM_LIST", "item-list-untitled.json")
+        .env("FAKE_OP_ITEM_GET", "item-get-revealed-untitled.json")
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    let doc = one_json_document(&out);
+    assert_eq!(doc["summary"]["created"], 0, "{doc}");
+    assert_eq!(doc["summary"]["unchanged"], 1);
+    assert_eq!(doc["summary"]["updated"], 0);
+    assert!(!t.log().contains("item edit"), "{}", t.log());
+
+    // A different password for the same username is a new login, not an edit.
+    let export = t.export("google-passwords-export-untitled.csv");
+    let out = t
+        .command(&["--json", "sync", s(&export), "--update", "--force"])
+        .env("FAKE_OP_ITEM_LIST", "item-list-untitled.json")
+        .output()
+        .unwrap();
+    let doc = one_json_document(&out);
+    assert_eq!(doc["summary"]["created"], 1, "{doc}");
+    assert!(!t.log().contains("item edit"), "{}", t.log());
+}
