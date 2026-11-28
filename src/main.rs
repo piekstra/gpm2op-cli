@@ -1,8 +1,8 @@
 //! `pw2op`: see the library crate.
 
 /// Set by the `gpm2op` alias when it execs this binary: the name the user
-/// typed, and the mark that stops a `pw2op` that is itself a copy of the alias
-/// from execing again.
+/// typed. When the exec'd `pw2op` is the alias again (a link resolved back to
+/// it), the same variable stops it from execing a second time.
 pub const ALIAS_ENV: &str = "PW2OP_INVOKED_AS";
 
 fn main() -> std::process::ExitCode {

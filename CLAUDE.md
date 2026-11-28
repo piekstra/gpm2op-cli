@@ -2,11 +2,12 @@
 
 Formerly gpm2op. The code is a library (`src/lib.rs`, `pw2op::main(name,
 file)`) with two binaries: `pw2op` (`src/main.rs`) and the pre-rename alias
-`gpm2op` (`src/bin/gpm2op.rs`: a stderr note, then it execs an adjacent
-`pw2op` with `PW2OP_INVOKED_AS=gpm2op`, or calls the same `main` when there
-is none). `name` is the command typed, for clap and completions; `file` is
-the running executable, the one `self-update` replaces. The variable also
-stops a `pw2op` that is a copy of the alias from execing again. Each release
+`gpm2op` (`src/bin/gpm2op.rs`: it execs an adjacent `pw2op` with
+`PW2OP_INVOKED_AS=gpm2op`, and that `pw2op` prints the rename note; with
+none, the alias prints its own note and calls the same `main`). `name` is the
+command typed, for clap and completions; `file` is the running executable,
+the one `self-update` replaces. A file named `pw2op` that is the alias never
+hands off; the variable stops a link back to the alias from execing again. Each release
 archive carries both, because a 0.4.0 install's updater asks the old repo
 (GitHub redirects), takes the asset whose name contains its target triple and
 extracts the file named `gpm2op`; `release.yml` fails a release whose archive
