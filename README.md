@@ -45,13 +45,18 @@ longer only for Google Password Manager. The repository moved from
 address.
 
 - **`gpm2op` keeps working** for at least two releases (through v0.6.x). It
-  is a second binary in every release and in `cargo install`, runs the same
-  code, and prints one note on stderr. `--json` stdout is unchanged.
+  is a second binary in every release and in `cargo install`, and prints one
+  note on stderr; `--json` stdout is unchanged. With `pw2op` in the same
+  directory, `gpm2op` runs it, so both names run the same release and
+  `self-update` through either one updates `pw2op`. On its own, `gpm2op` runs
+  its own copy of the code.
 - **Updating from gpm2op 0.4.0 or earlier:** `gpm2op self-update` replaces
-  the `gpm2op` binary with the new release's alias. To get the `pw2op` command
-  as well, install the new release (`cargo install --git
-  https://github.com/piekstra/pw2op-cli --tag v0.5.0 --force` installs both),
-  or copy `pw2op` from the release archive next to `gpm2op`.
+  the `gpm2op` binary with the new release's alias, and nothing else. Install
+  `pw2op` beside it: `cargo install --git
+  https://github.com/piekstra/pw2op-cli --tag v0.5.0 --force` installs both,
+  or copy `pw2op` from the release archive into the directory that holds
+  `gpm2op`. Do this before v0.7: releases after v0.6.x carry no `gpm2op`, so
+  an install with only `gpm2op` can no longer update itself.
 - **`GPM2OP_EDIT_TIMEOUT`** is still read when `PW2OP_EDIT_TIMEOUT` is unset.
 
 ## Prerequisites

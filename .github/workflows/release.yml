@@ -92,10 +92,11 @@ jobs:
             # the archive; without it that install cannot update.
             archive="dist/pw2op-$GITHUB_REF_NAME-$t.tar.gz"
             [ -f "$archive" ] || continue
+            # List once: grep -q closing a pipe from tar would fail the
+            # pipeline under pipefail even on a match.
+            listing=$(tar -tzf "$archive") || { echo "::error::cannot list $archive"; missing=1; continue; }
             for bin in pw2op gpm2op; do
-              if ! tar -tzf "$archive" | grep -qx "$bin"; then
-                echo "::error::$archive has no $bin"; missing=1
-              fi
+              grep -qx "$bin" <<<"$listing" || { echo "::error::$archive has no $bin"; missing=1; }
             done
           done
           exit "$missing"

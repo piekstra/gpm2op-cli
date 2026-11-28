@@ -7,10 +7,14 @@ clap command, completions and the binary `self-update` replaces. Each release
 archive carries both, because a 0.4.0 install's updater asks the old repo
 (GitHub redirects), takes the asset whose name contains its target triple and
 extracts the file named `gpm2op`; `release.yml` fails a release whose archive
-lacks either. Keep the alias through v0.6.x.
+lacks either. With `pw2op` beside it the alias execs that binary, so both
+names run the release `pw2op self-update` installed; alone it runs its own
+copy. Keep the alias through v0.6.x. Before removing it, ship a release whose
+alias tells the user to install `pw2op` (its note already does): an install
+holding only `gpm2op` cannot self-update once the archive drops that file.
 
 Upserts Google/Chrome Password Manager and Apple Passwords/Safari CSV exports
-into 1Password via the `op` CLI. Single binary crate. This file orients contributors/agents.
+into 1Password via the `op` CLI. One crate: a library (`src/lib.rs`) with two thin binaries, `pw2op` and the `gpm2op` alias. This file orients contributors/agents.
 
 ## Module map
 
@@ -79,7 +83,7 @@ password), `host_only` (empty username matched to the only login on the host,
 which may be another account; always skipped, `--update` included),
 `title_only` (no URL, matched a URL-less login on title + username; always
 skipped, `--update` included), `deduped` (dropped by `dedupe`) and `unreadable` (no URL and no username, so
-`source::read_csv` dropped them; `main` sets this count). `--json` reports them as `summary.unverified`; human mode prints a
+`source::read_csv` dropped them; `lib.rs`'s `do_sync` sets this count). `--json` reports them as `summary.unverified`; human mode prints a
 stderr line per group (`report::print_notes`), and
 `report::deleted_line` says 1Password holds every credential only when
 `Summary::complete`. `export::may_delete` decides from the run's end,

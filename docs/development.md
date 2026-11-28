@@ -12,7 +12,7 @@ Repo-local facts for working on `pw2op`. Architecture rationale lives in
 
 ## Layout
 
-Single binary crate. Modules:
+One crate: a library (`src/lib.rs`) with two thin binaries, `pw2op` and the `gpm2op` alias. Modules:
 
 ```
 src/lib.rs         # clap dispatch, exit codes (pw2op::main)

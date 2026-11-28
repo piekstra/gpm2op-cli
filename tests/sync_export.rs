@@ -58,8 +58,14 @@ impl Scratch {
     }
 
     fn command(&self, args: &[&str]) -> Command {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_pw2op"));
+        self.command_of(Path::new(env!("CARGO_BIN_EXE_pw2op")), args)
+    }
+
+    fn command_of(&self, exe: &Path, args: &[&str]) -> Command {
+        let mut cmd = Command::new(exe);
         cmd.args(args)
+            .env_remove("PW2OP_EDIT_TIMEOUT")
+            .env_remove("GPM2OP_EDIT_TIMEOUT")
             .env(
                 "PATH",
                 format!("{}:/usr/bin:/bin", repo("tests/support/bin").display()),
@@ -1036,19 +1042,23 @@ fn a_row_with_no_url_and_no_title_is_not_created_twice() {
     assert!(!t.log().contains("item edit"), "{}", t.log());
 }
 
+/// A copy of the alias in a directory of its own, as a 0.4.0 install that
+/// self-updated has it: no `pw2op` beside it.
+fn lone_alias(t: &Scratch) -> std::path::PathBuf {
+    let dir = t.dir.path().join("lone");
+    std::fs::create_dir_all(&dir).unwrap();
+    let alias = dir.join("gpm2op");
+    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
+    alias
+}
+
 #[test]
-fn the_gpm2op_alias_runs_pw2op_under_its_old_name() {
+fn the_gpm2op_alias_alone_runs_pw2op_under_its_old_name() {
     let t = Scratch::new();
     let export = t.export("google-passwords-export.csv");
-    let out = Command::new(env!("CARGO_BIN_EXE_gpm2op"))
-        .args(["--json", "sync", s(&export), "--dry-run"])
-        .env(
-            "PATH",
-            format!("{}:/usr/bin:/bin", repo("tests/support/bin").display()),
-        )
-        .env("FAKE_OP_DIR", repo("tests/fixtures/op"))
-        .env("TMPDIR", t.tmp())
-        .stdin(Stdio::null())
+    let alias = lone_alias(&t);
+    let out = t
+        .command_of(&alias, &["--json", "sync", s(&export), "--dry-run"])
         .output()
         .unwrap();
     assert!(out.status.success(), "{}", stderr(&out));
@@ -1058,17 +1068,77 @@ fn the_gpm2op_alias_runs_pw2op_under_its_old_name() {
         "{}",
         stderr(&out)
     );
+    assert!(
+        stderr(&out).contains("Install pw2op beside"),
+        "{}",
+        stderr(&out)
+    );
 
-    let help = Command::new(env!("CARGO_BIN_EXE_gpm2op"))
-        .arg("--help")
-        .output()
-        .unwrap();
+    let help = t.command_of(&alias, &["--help"]).output().unwrap();
     assert!(stdout(&help).contains("Usage: gpm2op"), "{}", stdout(&help));
-    let help = Command::new(env!("CARGO_BIN_EXE_pw2op"))
-        .arg("--help")
+    let help = t.run(&["--help"]);
+    assert!(stdout(&help).contains("Usage: pw2op"), "{}", stdout(&help));
+
+    // Completions register the name the user runs.
+    let zsh = t
+        .command_of(&alias, &["completions", "zsh"])
         .output()
         .unwrap();
-    assert!(stdout(&help).contains("Usage: pw2op"), "{}", stdout(&help));
+    assert!(
+        stdout(&zsh).starts_with("#compdef gpm2op"),
+        "{}",
+        stdout(&zsh)
+    );
+    let zsh = t.run(&["completions", "zsh"]);
+    assert!(
+        stdout(&zsh).starts_with("#compdef pw2op"),
+        "{}",
+        stdout(&zsh)
+    );
+}
+
+#[test]
+fn the_gpm2op_alias_beside_pw2op_runs_it() {
+    let t = Scratch::new();
+    let dir = t.dir.path().join("both");
+    std::fs::create_dir_all(&dir).unwrap();
+    let alias = dir.join("gpm2op");
+    std::fs::copy(env!("CARGO_BIN_EXE_gpm2op"), &alias).unwrap();
+    // A stand-in pw2op that records its arguments, so the test shows which
+    // binary ran.
+    let pw2op = dir.join("pw2op");
+    std::fs::write(&pw2op, "#!/bin/sh\necho \"ran pw2op with: $*\"\n").unwrap();
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(&pw2op, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    let out = t
+        .command_of(&alias, &["self-update", "--check"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", stderr(&out));
+    assert_eq!(stdout(&out), "ran pw2op with: self-update --check\n");
+}
+
+#[test]
+fn the_new_edit_timeout_variable_wins_over_the_old_one() {
+    let t = Scratch::new();
+    let export = t.export("google-passwords-export.csv");
+    let out = t
+        .command(&["sync", s(&export), "--update", "--force"])
+        .env("PW2OP_EDIT_TIMEOUT", "new")
+        .env("GPM2OP_EDIT_TIMEOUT", "old")
+        .output()
+        .unwrap();
+    assert!(
+        stderr(&out).contains("warning: PW2OP_EDIT_TIMEOUT=\"new\""),
+        "{}",
+        stderr(&out)
+    );
+    assert!(
+        !stderr(&out).contains("GPM2OP_EDIT_TIMEOUT"),
+        "{}",
+        stderr(&out)
+    );
 }
 
 #[test]
